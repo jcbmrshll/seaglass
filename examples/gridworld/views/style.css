@@ -1,0 +1,23 @@
+/* the gridworld views' styles: they run in frames of their own, so they bring them */
+
+.gw { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+.gw canvas { width: 100%; max-width: 420px; display: block; border: 1px solid var(--sg-edge); }
+.gw .controls { display: flex; align-items: center; gap: 6px; width: 100%; max-width: 420px; font: 11px var(--sg-mono); color: var(--sg-dim); }
+.gw .controls input[type="range"] { flex: 1; accent-color: var(--sg-accent); }
+.gw button {
+  font: 11px var(--sg-mono);
+  color: var(--sg-fg);
+  background: var(--sg-panel);
+  border: 1px solid var(--sg-edge);
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.gw button.on { border-color: var(--sg-accent); }
+.gw .caption { font: 11px var(--sg-mono); color: var(--sg-dim); }
+.gw .caption b { color: var(--sg-fg-strong); }
+
+.values { height: 100%; display: flex; flex-direction: column; gap: 10px; padding: 12px; box-sizing: border-box; }
+.values .bar { display: flex; align-items: center; gap: 8px; font: 11px var(--sg-mono); color: var(--sg-dim); }
+.values .bar .spacer { flex: 1; }
+.values .stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+.values canvas { max-width: 100%; max-height: 100%; aspect-ratio: 1; border: 1px solid var(--sg-edge); }

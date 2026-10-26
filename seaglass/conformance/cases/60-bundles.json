@@ -1,0 +1,66 @@
+[
+  {
+    "name": "bundles are uploaded once, by hash, and served with CORS",
+    "setup": {"bundles": {"b": {
+      "layout.json": "{\"contract\": 1, \"renderers\": {\"conformance/thing\": \"views/thing.js\"}, \"nonce\": \"{{nonce}}\"}",
+      "views/thing.js": "export function render({ el }) { el.textContent = '{{nonce}}'; }\n",
+      "style.css": "p { color: red }\n"
+    }}},
+    "steps": [
+      {"request": {"method": "GET", "path": "/api/bundles/{{b.hash}}"},
+       "response": {"status": 404, "json": {"error": {"$type": "string"}}}},
+      {"request": {"method": "PUT", "path": "/api/bundles/{{b.hash}}", "json": {"files": "{{b.files}}"}},
+       "response": {"status": 201, "json": {"hash": {"$var": "b.hash"}, "files": {"$contains": [
+         {"$exact": {"path": "layout.json", "size": {"$type": "integer"}}},
+         {"$exact": {"path": "views/thing.js", "size": {"$type": "integer"}}},
+         {"$exact": {"path": "style.css", "size": 17}}]}}}},
+      {"request": {"method": "GET", "path": "/api/bundles/{{b.hash}}"},
+       "response": {"status": 200, "json": {"hash": {"$var": "b.hash"}, "files": {"$contains": [{"path": "views/thing.js"}]}}}},
+      {"request": {"method": "PUT", "path": "/api/bundles/{{b.hash}}", "json": {"files": "{{b.files}}"}},
+       "response": {"status": 200, "json": {"hash": {"$var": "b.hash"}}}},
+      {"request": {"method": "GET", "path": "/bundles/{{b.hash}}/views/thing.js"},
+       "response": {"status": 200, "headers": {"Content-Type": {"$regex": "^text/javascript"}, "Access-Control-Allow-Origin": "*"},
+                    "text": "export function render({ el }) { el.textContent = '{{nonce}}'; }\n"}},
+      {"request": {"method": "GET", "path": "/bundles/{{b.hash}}/style.css"},
+       "response": {"status": 200, "headers": {"Content-Type": {"$regex": "^text/css"}, "Access-Control-Allow-Origin": "*"}}},
+      {"request": {"method": "GET", "path": "/bundles/{{b.hash}}/layout.json"},
+       "response": {"status": 200, "headers": {"Content-Type": {"$regex": "^application/json"}}, "json": {"contract": 1, "nonce": "{{nonce}}"}}},
+      {"request": {"method": "GET", "path": "/bundles/{{b.hash}}/missing.js"},
+       "response": {"status": 404}},
+      {"request": {"method": "POST", "path": "/api/runs", "json": {"project": "conformance", "bundle": "{{b.hash}}"}},
+       "response": {"status": 201, "json": {"bundle": {"$var": "b.hash"}}}}
+    ]
+  },
+  {
+    "name": "a run may name a bundle the server doesn't have",
+    "steps": [
+      {"request": {"method": "POST", "path": "/api/runs", "json": {"project": "conformance", "bundle": "0000000000000000000000000000000000000000000000000000000000000000"}},
+       "response": {"status": 201, "json": {"bundle": "0000000000000000000000000000000000000000000000000000000000000000"}}}
+    ]
+  },
+  {
+    "name": "bundles that don't hash to their name, or lack a layout, are refused",
+    "setup": {"bundles": {
+      "good": {"layout.json": "{\"contract\": 1, \"nonce\": \"{{nonce}}\"}"},
+      "nolayout": {"view.js": "// {{nonce}}\n"},
+      "badlayout": {"layout.json": "[\"{{nonce}}\"]"},
+      "nocontract": {"layout.json": "{\"nonce\": \"{{nonce}}\"}"}
+    }},
+    "steps": [
+      {"request": {"method": "PUT", "path": "/api/bundles/0000000000000000000000000000000000000000000000000000000000000000", "json": {"files": "{{good.files}}"}},
+       "response": {"status": 400, "json": {"error": {"$type": "string"}}}},
+      {"request": {"method": "PUT", "path": "/api/bundles/{{nolayout.hash}}", "json": {"files": "{{nolayout.files}}"}},
+       "response": {"status": 400}},
+      {"request": {"method": "PUT", "path": "/api/bundles/{{badlayout.hash}}", "json": {"files": "{{badlayout.files}}"}},
+       "response": {"status": 400}},
+      {"request": {"method": "PUT", "path": "/api/bundles/{{nocontract.hash}}", "json": {"files": "{{nocontract.files}}"}},
+       "response": {"status": 400}},
+      {"request": {"method": "PUT", "path": "/api/bundles/{{good.hash}}", "json": {"files": {"layout.json": "not base64!"}}},
+       "response": {"status": 400}},
+      {"request": {"method": "GET", "path": "/api/bundles/{{good.hash}}"},
+       "response": {"status": 404}},
+      {"request": {"method": "PUT", "path": "/api/bundles/{{good.hash}}", "json": {"files": "{{good.files}}"}},
+       "response": {"status": 201}}
+    ]
+  }
+]

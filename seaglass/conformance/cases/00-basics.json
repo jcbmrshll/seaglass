@@ -1,0 +1,24 @@
+[
+  {
+    "name": "the server says which protocol it speaks",
+    "steps": [
+      {"request": {"method": "GET", "path": "/api"},
+       "response": {"status": 200,
+                    "headers": {"Content-Type": {"$regex": "^application/json"}, "Access-Control-Allow-Origin": "*"},
+                    "json": {"protocol": 1, "server": {"$type": "string"}}}}
+    ]
+  },
+  {
+    "name": "unknown runs are 404 with an error",
+    "steps": [
+      {"request": {"method": "GET", "path": "/api/runs/20000101-000000-0000"},
+       "response": {"status": 404, "json": {"error": {"$type": "string"}}}},
+      {"request": {"method": "GET", "path": "/api/runs/20000101-000000-0000/metrics?since=0"},
+       "response": {"status": 404, "json": {"error": {"$type": "string"}}}},
+      {"request": {"method": "POST", "path": "/api/runs/20000101-000000-0000/metrics", "json": [{"step": 0, "loss": 1}]},
+       "response": {"status": 404, "json": {"error": {"$type": "string"}}}},
+      {"request": {"method": "GET", "path": "/api/runs/not-a-run-id"},
+       "response": {"status": 404, "json": {"error": {"$type": "string"}}}}
+    ]
+  }
+]

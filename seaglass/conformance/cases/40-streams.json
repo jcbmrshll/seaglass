@@ -1,0 +1,42 @@
+[
+  {
+    "name": "stream rows are appended and read incrementally",
+    "steps": [
+      {"request": {"method": "POST", "path": "/api/runs", "json": {"project": "conformance"}},
+       "response": {"status": 201, "json": {"id": {"$capture": "run"}, "created": {"$capture": "created"}}}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}/streams/members"},
+       "response": {"status": 200, "json": {"$exact": {"rows": [], "next": 0}}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/streams/members", "json": [
+         {"step": 0, "ids": [1, 2], "fitness": [0.5, null]},
+         {"step": 1, "ids": [2, 3], "fitness": [0.7, 0.1], "time": 5}]},
+       "response": {"status": 200, "json": {"ok": true}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/streams/other.stream", "json": [{"step": 9, "x": {"nested": true}}]},
+       "response": {"status": 200}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}/streams/members?since=0"},
+       "response": {"status": 200, "json": {"$exact": {"next": 2, "rows": [
+         {"step": 0, "ids": [1, 2], "fitness": [0.5, null], "time": {"$gte": "created"}},
+         {"step": 1, "ids": [2, 3], "fitness": [0.7, 0.1], "time": {"$gte": "created"}}]}}}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}/streams/members?since=1"},
+       "response": {"status": 200, "json": {"next": 2, "rows": [{"step": 1}]}}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}/streams/other.stream"},
+       "response": {"status": 200, "json": {"next": 1, "rows": [{"step": 9, "x": {"nested": true}}]}}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}"},
+       "response": {"status": 200, "json": {"step": 9}}}
+    ]
+  },
+  {
+    "name": "invalid stream rows are refused",
+    "steps": [
+      {"request": {"method": "POST", "path": "/api/runs", "json": {"project": "conformance"}},
+       "response": {"status": 201, "json": {"id": {"$capture": "run"}}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/streams/.dot", "json": [{"step": 0}]},
+       "response": {"status": 400, "json": {"error": {"$type": "string"}}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/streams/ok", "json": [{"x": 1}]},
+       "response": {"status": 400}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/streams/ok", "json": {"step": 0}},
+       "response": {"status": 400}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}/streams/ok"},
+       "response": {"status": 200, "json": {"$exact": {"rows": [], "next": 0}}}}
+    ]
+  }
+]

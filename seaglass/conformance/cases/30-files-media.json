@@ -1,0 +1,79 @@
+[
+  {
+    "name": "files are stored once, and served by type",
+    "steps": [
+      {"request": {"method": "POST", "path": "/api/runs", "json": {"project": "conformance"}},
+       "response": {"status": 201, "json": {"id": {"$capture": "run"}}}},
+      {"request": {"method": "PUT", "path": "/api/runs/{{run}}/files/data/summary.json", "text": "{\"a\": [1, 2]}"},
+       "response": {"status": 201, "json": {"$exact": {"path": "data/summary.json", "size": 13}}}},
+      {"request": {"method": "PUT", "path": "/api/runs/{{run}}/files/data/summary.json", "text": "{\"a\": [1, 2]}"},
+       "response": {"status": 200, "json": {"path": "data/summary.json", "size": 13}}},
+      {"request": {"method": "PUT", "path": "/api/runs/{{run}}/files/data/summary.json", "text": "{\"a\": [3]}"},
+       "response": {"status": 409, "json": {"error": {"$type": "string"}}}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}/files/data/summary.json"},
+       "response": {"status": 200, "headers": {"Content-Type": {"$regex": "^application/json"}, "Access-Control-Allow-Origin": "*"}, "text": "{\"a\": [1, 2]}"}},
+      {"request": {"method": "PUT", "path": "/api/runs/{{run}}/files/blob.bin", "base64": "AAEC/w=="},
+       "response": {"status": 201, "json": {"size": 4}}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}/files/blob.bin"},
+       "response": {"status": 200, "headers": {"Content-Type": {"$regex": "^application/octet-stream"}}, "base64": "AAEC/w=="}},
+      {"request": {"method": "PUT", "path": "/api/runs/{{run}}/files/pic.png", "base64": "iVBORw0KGgo="},
+       "response": {"status": 201}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}/files/pic.png"},
+       "response": {"status": 200, "headers": {"Content-Type": {"$regex": "^image/png"}}}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}/files/missing.json"},
+       "response": {"status": 404, "json": {"error": {"$type": "string"}}}},
+      {"request": {"method": "PUT", "path": "/api/runs/{{run}}/files/data/.hidden", "text": "x"},
+       "response": {"status": 400, "json": {"error": {"$type": "string"}}}},
+      {"request": {"method": "PUT", "path": "/api/runs/{{run}}/files/sp%20ace.txt", "text": "x"},
+       "response": {"status": 400}}
+    ]
+  },
+  {
+    "name": "media entries name a file, a type and attrs",
+    "steps": [
+      {"request": {"method": "POST", "path": "/api/runs", "json": {"project": "conformance"}},
+       "response": {"status": 201, "json": {"id": {"$capture": "run"}, "created": {"$capture": "created"}}}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}/media"},
+       "response": {"status": 200, "json": {"$exact": {"rows": [], "next": 0}}}},
+      {"request": {"method": "PUT", "path": "/api/runs/{{run}}/files/episode/3-a1f0.npz", "base64": "UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA=="},
+       "response": {"status": 201}},
+      {"request": {"method": "PUT", "path": "/api/runs/{{run}}/files/cfg/3.json", "text": "{}"},
+       "response": {"status": 201}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/media", "json": [
+         {"key": "episode", "step": 3, "type": "gridworld/episode", "file": "episode/3-a1f0.npz", "attrs": {"seed": 7, "who": ["a", "b"]}},
+         {"key": "cfg", "step": 3, "file": "cfg/3.json"}]},
+       "response": {"status": 200, "json": {"ok": true}}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}/media?since=0"},
+       "response": {"status": 200, "json": {"$exact": {"next": 2, "rows": [
+         {"key": "episode", "step": 3, "type": "gridworld/episode", "file": "episode/3-a1f0.npz", "attrs": {"seed": 7, "who": ["a", "b"]}, "time": {"$gte": "created"}},
+         {"key": "cfg", "step": 3, "file": "cfg/3.json", "time": {"$gte": "created"}}]}}}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}/media?since=1"},
+       "response": {"status": 200, "json": {"next": 2, "rows": [{"key": "cfg"}]}}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}"},
+       "response": {"status": 200, "json": {"step": 3, "latest": {}}}}
+    ]
+  },
+  {
+    "name": "invalid media entries are refused",
+    "steps": [
+      {"request": {"method": "POST", "path": "/api/runs", "json": {"project": "conformance"}},
+       "response": {"status": 201, "json": {"id": {"$capture": "run"}}}},
+      {"request": {"method": "PUT", "path": "/api/runs/{{run}}/files/x.json", "text": "1"},
+       "response": {"status": 201}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/media", "json": [{"key": "x", "step": 0, "file": "nope.json"}]},
+       "response": {"status": 400, "json": {"error": {"$type": "string"}}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/media", "json": [{"key": "x", "step": 0, "file": "x.json", "type": "NoNamespace"}]},
+       "response": {"status": 400}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/media", "json": [{"key": "x", "step": 0, "file": "x.json", "type": "Upper/case"}]},
+       "response": {"status": 400}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/media", "json": [{"key": "", "step": 0, "file": "x.json"}]},
+       "response": {"status": 400}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/media", "json": [{"key": "x", "file": "x.json"}]},
+       "response": {"status": 400}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/media", "json": [{"key": "x", "step": 0, "file": "x.json", "attrs": [1]}]},
+       "response": {"status": 400}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}/media"},
+       "response": {"status": 200, "json": {"$exact": {"rows": [], "next": 0}}}}
+    ]
+  }
+]

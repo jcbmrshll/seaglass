@@ -1,0 +1,25 @@
+{
+  "contract": 1,
+  "renderers": {
+    "gridworld/episode": "episode.js"
+  },
+  "summary": ["mean_return", "success"],
+  "tabs": [
+    {
+      "title": "Training",
+      "rows": [
+        [{"type": "tiles", "metrics": ["mean_return", "success", "episode_length", "epsilon"]}],
+        [
+          {"type": "media", "keys": ["episode"], "width": 1},
+          {"type": "chart", "title": "return", "metrics": ["*_return"], "smooth": 5, "width": 1}
+        ],
+        [{"type": "chart", "metrics": ["success", "episode_length", "td_error", "epsilon"], "split": true}],
+        [{"type": "config"}]
+      ]
+    },
+    {
+      "title": "Values",
+      "panel": {"type": "view", "module": "values.js", "props": {"key": "values"}}
+    }
+  ]
+}
