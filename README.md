@@ -43,17 +43,23 @@ Pages poll while they're open, so a running run updates live.
 ```python
 from seaglass import Arrays, Monitor, Row
 
-monitor = Monitor(project="gridworld", views="views/")   # url: $SEAGLASS_URL, else localhost:8008
+# the server is $SEAGLASS_URL, else localhost:8008
+monitor = Monitor(project="gridworld", views="views/")
 monitor.start(config={"lr": 3e-4}, total=300)
 for step in range(300):
     monitor.activity(f"epoch {step}: training")
     ...
-    monitor.log(step, {
-        "loss": loss,                                       # a metric
-        "episode": Arrays("gridworld/episode", grid=g, path=p),  # raw arrays, drawn by the bundle
-        "summary": {"best": best},                          # JSON, shown as a tree
-        "members": Row(ids=ids, fitness=fitness),           # a row of the "members" stream
-    })
+    data = {
+        # a metric
+        "loss": loss,
+        # raw arrays, drawn by the bundle's renderer for the type
+        "episode": Arrays("gridworld/episode", grid=g, path=p),
+        # JSON, shown as a tree
+        "summary": {"best": best},
+        # a row of the "members" stream
+        "members": Row(ids=ids, fitness=fitness),
+    }
+    monitor.log(step, data)
 monitor.finish()
 ```
 
