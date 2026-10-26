@@ -23,7 +23,7 @@ import threading
 import time
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any, Protocol
 
 from seaglass.bundle import HASH, bundle_hash, valid_path
 
@@ -88,6 +88,10 @@ NOUNS = [
     "wren",
     "yarrow",
 ]
+
+
+class Readable(Protocol):
+    def read(self, n: int, /) -> bytes: ...
 
 
 class Invalid(ValueError):
@@ -312,7 +316,7 @@ class RunStore:
             meta = self._touch(run_dir, now, (row["step"] for row in rows))
             self._write_meta(run_dir, meta)
 
-    def put_file(self, run_id: str, path: str, body: BinaryIO, size: int) -> bool:
+    def put_file(self, run_id: str, path: str, body: Readable, size: int) -> bool:
         """Store `size` bytes read from `body` as the run's file `path`; whether it's
         new (False if it was there already, with the same bytes)."""
         run_dir = self._dir(run_id)

@@ -1,0 +1,58 @@
+[
+  {
+    "name": "metrics are appended and read incrementally",
+    "steps": [
+      {"request": {"method": "POST", "path": "/api/runs", "json": {"project": "conformance"}},
+       "response": {"status": 201, "json": {"id": {"$capture": "run"}, "created": {"$capture": "created"}}}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}/metrics"},
+       "response": {"status": 200, "json": {"$exact": {"rows": [], "next": 0}}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/metrics", "json": [{"step": 0, "loss": 1.5, "acc": null}, {"step": 1, "loss": 0.5, "acc": 0.25}]},
+       "response": {"status": 200, "json": {"ok": true}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/metrics", "json": [{"step": 2, "acc": null, "loss/policy": 7}]},
+       "response": {"status": 200, "json": {"ok": true}}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}/metrics?since=0"},
+       "response": {"status": 200, "json": {"$exact": {"next": 3, "rows": [
+         {"step": 0, "loss": 1.5, "acc": null, "time": {"$gte": "created"}},
+         {"step": 1, "loss": 0.5, "acc": 0.25, "time": {"$gte": "created"}},
+         {"step": 2, "acc": null, "loss/policy": 7, "time": {"$gte": "created"}}]}}}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}/metrics?since=2"},
+       "response": {"status": 200, "json": {"next": 3, "rows": [{"step": 2, "loss/policy": 7}]}}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}/metrics?since=3"},
+       "response": {"status": 200, "json": {"$exact": {"rows": [], "next": 3}}}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}/metrics?since=10"},
+       "response": {"status": 200, "json": {"$exact": {"rows": [], "next": 3}}}}
+    ]
+  },
+  {
+    "name": "a run's meta follows its metrics: step, latest, updated",
+    "steps": [
+      {"request": {"method": "POST", "path": "/api/runs", "json": {"project": "conformance"}},
+       "response": {"status": 201, "json": {"id": {"$capture": "run"}, "updated": {"$capture": "t0"}}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/metrics", "json": [{"step": 5, "loss": 2, "acc": 0.1}, {"step": 3, "loss": 1, "acc": null}]},
+       "response": {"status": 200}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}"},
+       "response": {"status": 200, "json": {"step": 5, "latest": {"$exact": {"loss": 1, "acc": 0.1}}, "updated": {"$gte": "t0"}}}}
+    ]
+  },
+  {
+    "name": "invalid metrics are refused",
+    "steps": [
+      {"request": {"method": "POST", "path": "/api/runs", "json": {"project": "conformance"}},
+       "response": {"status": 201, "json": {"id": {"$capture": "run"}}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/metrics", "json": {"step": 0, "loss": 1}},
+       "response": {"status": 400, "json": {"error": {"$type": "string"}}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/metrics", "json": [{"loss": 1}]},
+       "response": {"status": 400}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/metrics", "json": [{"step": 1.5, "loss": 1}]},
+       "response": {"status": 400}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/metrics", "json": [{"step": 0, "loss": "low"}]},
+       "response": {"status": 400}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/metrics", "json": [{"step": 0, "ok": true}]},
+       "response": {"status": 400}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/metrics", "json": [{"step": 0, "time": 3}]},
+       "response": {"status": 400}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}/metrics"},
+       "response": {"status": 200, "json": {"$exact": {"rows": [], "next": 0}}}}
+    ]
+  }
+]

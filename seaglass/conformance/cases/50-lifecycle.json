@@ -1,0 +1,65 @@
+[
+  {
+    "name": "activity is kept, with when it last changed",
+    "steps": [
+      {"request": {"method": "POST", "path": "/api/runs", "json": {"project": "conformance"}},
+       "response": {"status": 201, "json": {"id": {"$capture": "run"}, "created": {"$capture": "created"}}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/activity", "json": {"activity": "evaluating"}},
+       "response": {"status": 200, "json": {"ok": true}}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}"},
+       "response": {"status": 200, "json": {"activity": "evaluating", "activity_since": {"$gte": "created", "$capture": "since"}, "updated": {"$gte": "since"}}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/activity", "json": {"activity": "evaluating"}},
+       "response": {"status": 200}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}"},
+       "response": {"status": 200, "json": {"activity": "evaluating", "activity_since": {"$var": "since"}}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/activity", "json": {"activity": null}},
+       "response": {"status": 200}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}"},
+       "response": {"status": 200, "json": {"activity": null, "status": "running"}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/activity", "json": {"activity": 3}},
+       "response": {"status": 400, "json": {"error": {"$type": "string"}}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/activity", "json": {}},
+       "response": {"status": 400}}
+    ]
+  },
+  {
+    "name": "finishing sets the status and clears the activity",
+    "steps": [
+      {"request": {"method": "POST", "path": "/api/runs", "json": {"project": "conformance"}},
+       "response": {"status": 201, "json": {"id": {"$capture": "run"}}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/activity", "json": {"activity": "training"}},
+       "response": {"status": 200}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/finish", "json": {}},
+       "response": {"status": 200, "json": {"ok": true}}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}"},
+       "response": {"status": 200, "json": {"status": "finished", "activity": null, "activity_since": null}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/finish", "json": {"status": "crashed"}},
+       "response": {"status": 200}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}"},
+       "response": {"status": 200, "json": {"status": "crashed"}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/finish", "json": {"status": "running"}},
+       "response": {"status": 400, "json": {"error": {"$type": "string"}}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/finish", "json": {"status": "Not OK"}},
+       "response": {"status": 400}}
+    ]
+  },
+  {
+    "name": "a finished run that logs is running again",
+    "steps": [
+      {"request": {"method": "POST", "path": "/api/runs", "json": {"project": "conformance"}},
+       "response": {"status": 201, "json": {"id": {"$capture": "run"}}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/finish", "json": {"status": "finished"}},
+       "response": {"status": 200}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/metrics", "json": [{"step": 1, "loss": 1}]},
+       "response": {"status": 200}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}"},
+       "response": {"status": 200, "json": {"status": "running", "step": 1}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/finish", "json": {}},
+       "response": {"status": 200}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/streams/s", "json": [{"step": 2}]},
+       "response": {"status": 200}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}"},
+       "response": {"status": 200, "json": {"status": "running", "step": 2}}}
+    ]
+  }
+]

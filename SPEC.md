@@ -560,7 +560,7 @@ summary).
 
 `seaglass conformance <url>` runs the suite against the server at `<url>` and exits
 non-zero if any case fails. The cases live in `seaglass/conformance/cases/*.json`;
-they were recorded against the reference server and then generalized, so that
+they were written from exchanges with the reference server, and generalized so that
 values a server picks (ids, names, times) are matched by kind rather than by value.
 They only add runs, so they can run against a server that holds other runs.
 
@@ -578,11 +578,19 @@ A case is a list of exchanges:
 }
 ```
 
-A **request** has `method`, `path`, optional `headers`, and at most one body:
-`json`, `text`, or `base64` (raw bytes). `{{name}}` in a path, a header or a string
-anywhere in a body is replaced by a value captured earlier.
+A case may have a `setup`. Every case starts with the variable `nonce`, a fresh
+random hex string, so a case can make data no earlier run of the suite made. For
+each bundle in `setup.bundles` (`{"<name>": {"<path>": "<text>"}}`), the runner
+computes `<name>.hash` (§6.2) and `<name>.files` (the files as base64, ready to
+upload), after replacing variables in the texts.
 
-A **response** has `status`, and optionally `headers` (names case-insensitive; only
+A **request** has `method`, `path`, optional `headers`, and at most one body:
+`json`, `text`, or `base64` (raw bytes). `{{name}}` in a path, a header, or a string
+anywhere in a body (or an expected body) is replaced by a variable: a string that is
+nothing but `{{name}}` becomes the variable's value, whatever its type; anywhere
+else the value is spliced in as text.
+
+A **response** has `status` (a status, or a list of those allowed), and optionally `headers` (names case-insensitive; only
 those listed are checked) and one body: `json`, `text` or `base64`. A `json` body
 matches the actual body this way:
 
