@@ -126,6 +126,12 @@ def _is_number(x: Any) -> bool:
     return isinstance(x, (int, float)) and not isinstance(x, bool)
 
 
+def _given(body: dict[str, Any], key: str, default: Any) -> Any:
+    """body[key], or the default if it's missing or null."""
+    value = body.get(key)
+    return default if value is None else value
+
+
 def _check_rows(rows: Any, what: str) -> list[dict[str, Any]]:
     _check(isinstance(rows, list), f"{what} are sent as a JSON array")
     for row in rows:
@@ -193,7 +199,7 @@ class RunStore:
 
     def create(self, body: Any) -> dict[str, Any]:
         _check(isinstance(body, dict), "a run is created from a JSON object")
-        project = body.get("project") or "default"
+        project = _given(body, "project", "default")
         _check(
             isinstance(project, str) and bool(PROJECT.fullmatch(project)),
             f"{project!r} isn't a project name",
@@ -203,11 +209,11 @@ class RunStore:
             name is None or (isinstance(name, str) and 0 < len(name) <= 200),
             "a run's name is a string of 1-200 characters",
         )
-        config = body.get("config") or {}
+        config = _given(body, "config", {})
         _check(isinstance(config, dict), "config is a JSON object")
-        provenance = body.get("provenance") or {}
+        provenance = _given(body, "provenance", {})
         _check(isinstance(provenance, dict), "provenance is a JSON object")
-        tags = check_tags(body.get("tags") or [])
+        tags = check_tags(_given(body, "tags", []))
         bundle = body.get("bundle")
         _check(
             bundle is None

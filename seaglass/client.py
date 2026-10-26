@@ -45,7 +45,7 @@ from urllib.parse import quote
 
 import numpy as np
 
-from seaglass.bundle import bundle_hash, read_bundle
+from seaglass.bundle import bundle_hash, problems, read_bundle
 
 DEFAULT_URL = "http://localhost:8008"
 HEARTBEAT_S = 30.0
@@ -83,8 +83,8 @@ class Arrays:
         out = {}
         for name, value in self.arrays.items():
             a = np.asarray(value)
-            fits = not a.size or (a.min() >= -(2**31) and a.max() < 2**31)
-            if a.dtype.kind in "iu" and a.dtype.itemsize == 8 and fits:
+            wide = a.dtype.kind in "iu" and a.dtype.itemsize == 8
+            if wide and (not a.size or (a.min() >= -(2**31) and a.max() < 2**31)):
                 a = a.astype(np.int32)
             if a.dtype.kind not in "biuf":
                 raise TypeError(f"{name} is {a.dtype}, not numbers")
@@ -239,6 +239,8 @@ class Monitor:
         self.tags = list(dict.fromkeys([*(tags or []), *(t.strip() for t in env_tags)]))
         self.tags = [t for t in self.tags if t]
         self.bundle = read_bundle(views) if views is not None else None
+        for problem in problems(self.bundle) if self.bundle else []:
+            _log(f"views: {problem}")
         self.bundle_hash = bundle_hash(self.bundle) if self.bundle else None
         self.heartbeat_s = heartbeat
         self.run_id: str | None = None

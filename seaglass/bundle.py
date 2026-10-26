@@ -2,6 +2,8 @@
 content hash (SPEC.md §6)."""
 
 import hashlib
+import json
+import posixpath
 import re
 from pathlib import Path
 
@@ -43,3 +45,43 @@ def read_bundle(directory: str | Path) -> dict[str, bytes]:
             raise ValueError(f"{rel!r} isn't a valid bundle path (SPEC.md §2)")
         files[rel] = path.read_bytes()
     return files
+
+
+# import/export ... from "x", import "x", import("x")
+_IMPORT = re.compile(
+    r"""(?:\bimport|\bexport)\s*(?:[\w*{}\s,$]+?\s*from\s*)?["']([^"']+)["']"""
+    r"""|\bimport\s*\(\s*["']([^"']+)["']\s*\)"""
+)
+
+
+def problems(files: dict[str, bytes]) -> list[str]:
+    """What breaks the module contract (SPEC.md §7.1, §8) in a bundle, as far as can
+    be seen without running it: a layout.json that isn't one, modules it names that
+    aren't there, and imports that aren't relative paths inside the bundle."""
+    out = []
+    try:
+        layout = json.loads(files["layout.json"])
+    except (KeyError, ValueError) as e:
+        return [f"layout.json is missing or isn't JSON ({e})"]
+    if not isinstance(layout, dict) or not isinstance(layout.get("contract"), int):
+        return ["layout.json needs an integer contract"]
+    named = list((layout.get("renderers") or {}).values())
+    for tab in layout.get("tabs") or []:
+        panels = [tab.get("panel")] + [p for row in tab.get("rows") or [] for p in row]
+        named += [p["module"] for p in panels if isinstance(p, dict) and "module" in p]
+    for module in named:
+        if module not in files:
+            out.append(f"layout.json names {module}, which isn't in the bundle")
+    for path, data in files.items():
+        if not path.endswith((".js", ".mjs")):
+            continue
+        for m in _IMPORT.finditer(data.decode(errors="replace")):
+            spec = m.group(1) or m.group(2)
+            target = posixpath.normpath(posixpath.join(posixpath.dirname(path), spec))
+            if not spec.startswith(("./", "../")):
+                out.append(
+                    f"{path} imports {spec!r}: modules import only ./ or ../ paths"
+                )
+            elif target.startswith("../") or target not in files:
+                out.append(f"{path} imports {spec!r}, which isn't in the bundle")
+    return out
