@@ -511,7 +511,7 @@ Every panel has a `type` and may have a `title` and a `width`.
 | type | fields | shows |
 |---|---|---|
 | `tiles` | `metrics`: patterns, default `summary` | each matching metric's latest value (as of the location's step) |
-| `chart` | `metrics`: patterns (required); `split`: bool, default `false`; `smooth`: integer ≥ 0, default `0`; `log`: bool, default `false` | the matching metrics against step, as one chart, or with `split` one chart per group (§8.4); `smooth` draws a trailing moving average over that many points over the faint raw line; `log` uses a log-scale y axis |
+| `chart` | `metrics`: patterns (required); `split`: bool, default `false`; `groups`: object, group name → pattern or patterns, with `split` only; `smooth`: integer ≥ 0, default `0`; `log`: bool, default `false` | the matching metrics against step, as one chart, or with `split` one chart per group (§8.4), `groups` naming groups of its own; `smooth` draws a trailing moving average over that many points over the faint raw line; `log` uses a log-scale y axis |
 | `media` | `keys`: patterns (required); `columns`: integer ≥ 1 | for each matching key, one card with that key's entries, drawn by the renderer for each entry's type, and a scrubber over the entries' steps; `columns` puts at most that many cards in a row (default: the frontend's choice), so `1` gives each card the panel's full width, and a frontend MAY still put fewer in a row on a narrow screen |
 | `view` | `module`: path in the bundle (required); `props`: object | a custom module (§7), given `props` as `data` |
 | `config` | | the run's config, as tables |
@@ -535,15 +535,20 @@ link.
 
 Each matched metric goes into one group:
 
-1. a name with a `/` goes into the group named by what comes before its last `/`,
-   as the series named by what follows it (`loss/policy` → group `loss`, series
-   `policy`);
-2. otherwise, a name `min_X`, `mean_X` or `max_X`, when at least two of the three
+1. a metric that matches a pattern in the panel's `groups` goes into that group, the
+   first listed if it matches several, as the series named by what the pattern's
+   first `*` matched, as much as it can (`"groups": {"avg_outcome": "*_avg_outcome"}`:
+   `random_avg_outcome` → group `avg_outcome`, series `random`); the whole name if
+   the pattern has no `*` or its first `*` matched nothing;
+2. otherwise, a name with a `/` goes into the group named by what comes before its
+   last `/`, as the series named by what follows it (`loss/policy` → group `loss`,
+   series `policy`);
+3. otherwise, a name `min_X`, `mean_X` or `max_X`, when at least two of the three
    were logged, goes into group `X` as series `min`, `mean` or `max`;
-3. otherwise a metric is a group of its own.
+4. otherwise a metric is a group of its own.
 
-Groups come in the order of their first metric, series max, mean, min first and the
-rest in order.
+A group is one chart whichever rule put its metrics there. Groups come in the order
+of their first metric, series max, mean, min first and the rest in order.
 
 ### 8.5 Default layout
 
