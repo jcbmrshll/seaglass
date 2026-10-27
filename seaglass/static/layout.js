@@ -193,6 +193,13 @@ export function entriesByKey(entries) {
   return byKey;
 }
 
+// a media panel's columns (§8.3): the most cards it puts in a row, or null for the
+// frontend's choice, as it is when the field is missing or not an integer >= 1
+export function mediaColumns(panel) {
+  const n = panel?.columns;
+  return Number.isInteger(n) && n >= 1 ? n : null;
+}
+
 // the index of the entry shown as of step: the last at or before it, or the first
 // if they all come after (null step: the latest)
 export function entryIndexAt(entries, step) {

@@ -134,7 +134,7 @@ The panel types:
 |---|---|
 | `tiles` | latest values |
 | `chart` | metrics by name or glob, with `smooth`, `log` and `split` options |
-| `media` | one key's entries, with a step scrubber |
+| `media` | a card per matching key, with a step scrubber; `columns` caps the cards in a row (`1`: each the full width) |
 | `view` | a custom module |
 | `config` | the run's config |
 

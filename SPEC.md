@@ -512,7 +512,7 @@ Every panel has a `type` and may have a `title` and a `width`.
 |---|---|---|
 | `tiles` | `metrics`: patterns, default `summary` | each matching metric's latest value (as of the location's step) |
 | `chart` | `metrics`: patterns (required); `split`: bool, default `false`; `smooth`: integer ≥ 0, default `0`; `log`: bool, default `false` | the matching metrics against step, as one chart, or with `split` one chart per group (§8.4); `smooth` draws a trailing moving average over that many points over the faint raw line; `log` uses a log-scale y axis |
-| `media` | `keys`: patterns (required) | for each matching key, one card with that key's entries, drawn by the renderer for each entry's type, and a scrubber over the entries' steps |
+| `media` | `keys`: patterns (required); `columns`: integer ≥ 1 | for each matching key, one card with that key's entries, drawn by the renderer for each entry's type, and a scrubber over the entries' steps; `columns` puts at most that many cards in a row (default: the frontend's choice), so `1` gives each card the panel's full width, and a frontend MAY still put fewer in a row on a narrow screen |
 | `view` | `module`: path in the bundle (required); `props`: object | a custom module (§7), given `props` as `data` |
 | `config` | | the run's config, as tables |
 
