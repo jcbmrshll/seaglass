@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  applyNavigate, entriesByKey, entryIndexAt, globRegex, locationQuery, logTicks, matchNames,
+  applyNavigate, entriesByKey, entryIndexAt, globCapture, globRegex, locationQuery, logTicks, matchNames,
   metricNames, niceTicks, parseLocation, resolveLayout, seriesPoints, smooth, splitGroups, valueAt,
 } from "../../seaglass/static/layout.js";
 
@@ -24,6 +24,36 @@ test("split groups", () => {
   assert.deepEqual(groups[1].series.map((s) => s.name), ["max", "mean", "min"]);
   assert.deepEqual(groups[0].series.map((s) => s.key), ["loss/policy", "loss/value"]);
   assert.deepEqual(groups[4].series, [{ name: "c", key: "a/b/c" }]);
+});
+
+test("pattern captures", () => {
+  assert.equal(globCapture("*_avg_outcome", "random_avg_outcome"), "random");
+  assert.equal(globCapture("*_avg_outcome", "loss"), null);
+  // the first * takes as much as it can
+  assert.equal(globCapture("*_*", "a_b_c"), "a_b");
+  assert.equal(globCapture("eval/?/*", "eval/x/return"), "return");
+  // no *, or an empty match: the whole name
+  assert.equal(globCapture("loss", "loss"), "loss");
+  assert.equal(globCapture("*avg_outcome", "avg_outcome"), "avg_outcome");
+  assert.equal(globCapture("a.b*", "axbc"), null);
+});
+
+test("named split groups", () => {
+  const names = ["loss", "random_avg_outcome", "loss/policy", "greedy_avg_outcome", "mean_return", "max_return", "lr", "best"];
+  const groups = splitGroups(names, { avg_outcome: "*_avg_outcome", other: ["lr", "*_avg_outcome"] });
+  // a group lands where its first metric does; the rest fall through to the usual rules
+  assert.deepEqual(groups.map((g) => g.name), ["loss", "avg_outcome", "return", "other", "best"]);
+  // series named by what * matched, in the order matched; the first listed group wins
+  assert.deepEqual(groups[1].series, [{ name: "random", key: "random_avg_outcome" }, { name: "greedy", key: "greedy_avg_outcome" }]);
+  // a pattern with no *: the whole name
+  assert.deepEqual(groups[3].series, [{ name: "lr", key: "lr" }]);
+  assert.deepEqual(groups[0].series.map((s) => s.name), ["loss", "policy"]);
+  // the panel's own pattern order decides where the group goes
+  const first = splitGroups(matchNames(["*_avg_outcome", "*"], names), { avg_outcome: "*_avg_outcome" });
+  assert.deepEqual(first.map((g) => g.name), ["avg_outcome", "loss", "return", "lr", "best"]);
+  // groups that aren't an object, and patterns that aren't strings, are ignored
+  assert.deepEqual(splitGroups(["a_x"], ["*_x"]), [{ name: "a_x", series: [{ name: "a_x", key: "a_x" }] }]);
+  assert.deepEqual(splitGroups(["a_x"], { g: [1, null] }), [{ name: "a_x", series: [{ name: "a_x", key: "a_x" }] }]);
 });
 
 test("metrics as of a step", () => {

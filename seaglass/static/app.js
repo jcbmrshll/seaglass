@@ -1137,7 +1137,7 @@ const PANELS = {
       updates = [];
       const names = matchNames(patterns, metricNames(page.rows));
       const groups = panel.split
-        ? splitGroups(names)
+        ? splitGroups(names, panel.groups)
         : names.length ? [{ name: title, series: names.map((k) => ({ name: k, key: k })) }] : [];
       const last = page.rows.length ? Math.max(...page.rows.map((r) => r.step)) : null;
       const from = page.chartWindow && last != null ? last - page.chartWindow + 1 : -Infinity;

@@ -138,6 +138,11 @@ The panel types:
 | `view` | a custom module |
 | `config` | the run's config |
 
+A `split` chart draws one chart per group of metrics (`loss/policy` and `loss/value`
+together, `min_X`/`mean_X`/`max_X` together); its `groups` names more, as
+`"groups": {"avg_outcome": "*_avg_outcome"}` charts every `<name>_avg_outcome`
+together, with a series per `<name>`.
+
 A row's panels share its width by their `width`. A tab with a single `panel` gives a
 view the whole page. Anything beyond this vocabulary belongs in a custom view.
 

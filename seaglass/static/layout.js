@@ -39,12 +39,14 @@ export function resolveLayout(layout) {
 
 const regexCache = new Map();
 
-// a pattern as a RegExp: * any run of characters, ? any one, anything else itself
+// a pattern as a regex source: * any run of characters, ? any one, anything else itself
+const globSource = (pattern) => [...pattern].map((c) => (c === "*" ? ".*" : c === "?" ? "." : c.replace(/[.+^${}()|[\]\\/]/g, "\\$&"))).join("");
+
+// a pattern as a RegExp
 export function globRegex(pattern) {
   let re = regexCache.get(pattern);
   if (!re) {
-    const body = [...pattern].map((c) => (c === "*" ? ".*" : c === "?" ? "." : c.replace(/[.+^${}()|[\]\\/]/g, "\\$&"))).join("");
-    re = new RegExp(`^${body}$`, "s");
+    re = new RegExp(`^${globSource(pattern)}$`, "s");
     regexCache.set(pattern, re);
   }
   return re;
@@ -67,19 +69,53 @@ export function matchNames(patterns, names) {
   return out;
 }
 
-// metrics into charts for a split chart panel (§8.4): "a/b" keys under "a" as series
+const captureCache = new Map();
+
+// what a pattern's first * matched in name (as much as it can), the whole name if the
+// pattern has no * or it matched nothing; null if the pattern doesn't match
+export function globCapture(pattern, name) {
+  let re = captureCache.get(pattern);
+  if (!re) {
+    const star = pattern.indexOf("*");
+    re = star < 0 ? globRegex(pattern) : new RegExp(`^${globSource(pattern.slice(0, star))}(.*)${globSource(pattern.slice(star + 1))}$`, "s");
+    captureCache.set(pattern, re);
+  }
+  const m = name.match(re);
+  return m ? m[1] || name : null;
+}
+
+// a split panel's `groups` as [group, patterns] pairs, in the order listed
+function namedGroups(groups) {
+  if (!groups || typeof groups !== "object" || Array.isArray(groups)) return [];
+  return Object.entries(groups).map(([g, p]) => [g, (Array.isArray(p) ? p : [p]).filter((x) => typeof x === "string")]);
+}
+
+// metrics into charts for a split chart panel (§8.4): a metric matching a named group's
+// pattern under that group, as the series its * matched; "a/b" keys under "a" as series
 // "b"; min_X, mean_X and max_X (two or more of them) under X; the rest alone
-export function splitGroups(names) {
+export function splitGroups(names, named = null) {
   const groups = new Map();
   const add = (group, series, key) => {
     if (!groups.has(group)) groups.set(group, []);
     groups.get(group).push({ name: series, key });
   };
   const set = new Set(names);
+  const listed = namedGroups(named);
+  const inNamed = (key) => {
+    for (const [group, patterns] of listed) {
+      for (const p of patterns) {
+        const series = globCapture(p, key);
+        if (series != null) return [group, series];
+      }
+    }
+    return null;
+  };
   for (const key of names) {
+    const hit = inNamed(key);
     const slash = key.lastIndexOf("/");
     const stat = key.match(/^(min|mean|max)_(.+)$/s);
-    if (slash > 0) add(key.slice(0, slash), key.slice(slash + 1), key);
+    if (hit) add(hit[0], hit[1], key);
+    else if (slash > 0) add(key.slice(0, slash), key.slice(slash + 1), key);
     else if (stat && ["min", "mean", "max"].filter((s) => set.has(`${s}_${stat[2]}`)).length > 1) add(stat[2], stat[1], key);
     else add(key, key, key);
   }
