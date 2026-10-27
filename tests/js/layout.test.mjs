@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  applyNavigate, entriesByKey, entryIndexAt, globCapture, globRegex, locationQuery, logTicks, matchNames,
+  applyNavigate, chartNotes, describe, descriptionList, entriesByKey, entryIndexAt, globCapture, globRegex, locationQuery, logTicks, matchNames,
   mediaColumns, metricNames, niceTicks, parseLocation, resolveLayout, seriesPoints, smooth, splitGroups, valueAt,
 } from "../../seaglass/static/layout.js";
 
@@ -141,4 +141,40 @@ test("media columns", () => {
   // anything but an integer >= 1 is the frontend's choice
   for (const columns of [0, -2, 1.5, "2", null, true, NaN, Infinity]) assert.equal(mediaColumns({ columns }), null);
   assert.equal(mediaColumns(undefined), null);
+});
+
+test("descriptions", () => {
+  const list = descriptionList({ "loss/*": "per-head loss", loss: "the total", "*_return": "a return", lr: 3, blank: " ", "*": "anything" });
+  // in the order listed; text that isn't a string, or is blank, is dropped
+  assert.deepEqual(list.map(([p]) => p), ["loss/*", "loss", "*_return", "*"]);
+  for (const bad of [null, "x", ["a"], 3]) assert.deepEqual(descriptionList(bad), []);
+  // the first pattern that matches
+  assert.equal(describe(list, "loss/policy"), "per-head loss");
+  assert.equal(describe(list, "loss"), "the total");
+  assert.equal(describe(list, "lr"), "anything");
+  assert.equal(describe([], "loss"), null);
+  assert.equal(describe(descriptionList({ "loss/*": "x" }), "loss"), null);
+  // the layouts carry them, the default none
+  assert.deepEqual(resolveLayout({ contract: 1, descriptions: { a: "b" } }).descriptions, [["a", "b"]]);
+  assert.deepEqual(resolveLayout(null).descriptions, []);
+  assert.deepEqual(resolveLayout({ contract: 2, descriptions: { a: "b" } }).descriptions, []);
+});
+
+test("a chart's notes", () => {
+  const list = descriptionList({ loss: "the TD loss, by head", "loss/policy": "the policy head's", "*_return": "return per episode", lr: "the learning rate" });
+  const one = (key) => ({ name: key, series: [{ name: key, key }] });
+  // one metric: its description, about the whole card
+  assert.deepEqual(chartNotes(list, one("lr")), [{ names: [], text: "the learning rate" }]);
+  assert.deepEqual(chartNotes(list, one("epsilon")), []);
+  // a group: its name's description, then its series'
+  const loss = { name: "loss", series: [{ name: "policy", key: "loss/policy" }, { name: "value", key: "loss/value" }] };
+  assert.deepEqual(chartNotes(list, loss), [{ names: [], text: "the TD loss, by head" }, { names: ["policy"], text: "the policy head's" }]);
+  // series that share a description are listed together, and when they all do, it's the card's
+  const ret = { name: "return", series: ["max", "mean", "min"].map((s) => ({ name: s, key: `${s}_return` })) };
+  assert.deepEqual(chartNotes(list, ret), [{ names: [], text: "return per episode" }]);
+  const some = { name: "", series: [{ name: "a_return", key: "a_return" }, { name: "lr", key: "lr" }, { name: "b_return", key: "b_return" }] };
+  assert.deepEqual(chartNotes(list, some), [{ names: ["a_return", "b_return"], text: "return per episode" }, { names: ["lr"], text: "the learning rate" }]);
+  // a series named like the card isn't described twice
+  const mixed = { name: "loss", series: [{ name: "loss", key: "loss" }, { name: "policy", key: "loss/policy" }] };
+  assert.deepEqual(chartNotes(list, mixed), [{ names: ["loss"], text: "the TD loss, by head" }, { names: ["policy"], text: "the policy head's" }]);
 });

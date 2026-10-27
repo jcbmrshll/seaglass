@@ -470,6 +470,10 @@ goes to the new location.
   "contract": 1,
   "renderers": {"gridworld/episode": "episode.js"},
   "summary": ["return", "loss"],
+  "descriptions": {
+    "return": "Undiscounted return, averaged over the epoch's episodes.",
+    "loss/*": "TD loss per head. Spikes just after a target sync are expected."
+  },
   "tabs": [
     {"title": "Training", "rows": [
       [{"type": "tiles"}],
@@ -488,9 +492,19 @@ goes to the new location.
 | `contract` | required: `1` |
 | `renderers` | media type → module path in the bundle |
 | `summary` | metric patterns: the metrics that represent the run where runs are listed together, and the default tiles |
+| `descriptions` | object, pattern → text: what the metrics and media keys it matches are |
 | `tabs` | the run page, as tabs; without it, the default layout (§8.5) |
 
 A frontend MUST ignore fields it does not know, here and in panels.
+
+**Descriptions** say what a metric is, so that a reader can tell without asking
+whoever logged it. A metric or media key is described by the first pattern (§8.3), in
+the order listed, that matches it; text that is not a string describes nothing. The
+text is plain, not markup, and its line breaks are kept. A frontend SHOULD offer a
+description wherever it shows what it describes (a tile, a chart, a media card), as a
+control that shows it rather than as text always on screen. A chart of several
+metrics shows the description of its title, when one matches it, and of each metric
+it draws.
 
 ### 8.2 Tabs and rows
 

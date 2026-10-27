@@ -68,6 +68,16 @@ def test_problems():
     assert any("'./nope.js'" in p for p in found)
     assert any("'../../out.js'" in p for p in found)
     assert problems({"x.js": b""}) and problems({"layout.json": b"[]"})
+    described = {
+        **good,
+        "layout.json": b'{"contract": 1, "descriptions": {"loss": "the TD loss"}}',
+    }
+    assert problems(described) == []
+    for descriptions in (b'["loss"]', b'{"loss": {"text": "x"}}', b'"loss"'):
+        layout = b'{"contract": 1, "descriptions": ' + descriptions + b"}"
+        assert any(
+            "descriptions" in p for p in problems({**good, "layout.json": layout})
+        )
 
 
 def test_example_bundle_is_clean():
