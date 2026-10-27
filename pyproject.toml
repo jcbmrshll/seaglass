@@ -1,6 +1,6 @@
 [project]
 name = "seaglass"
-version = "0.1.1"
+version = "0.1.2"
 description = "Experiment monitoring for research code, with renderers that travel with the runs"
 authors = [{ name = "Jacob Marshall", email = "92640744+jcbmrshll@users.noreply.github.com" }]
 license = "Apache-2.0"
