@@ -2,6 +2,6 @@
 
 from seaglass.client import DEFAULT_URL, Arrays, Data, File, Monitor, Row
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 __all__ = ["DEFAULT_URL", "Arrays", "Data", "File", "Monitor", "Row", "__version__"]
