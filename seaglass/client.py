@@ -46,6 +46,7 @@ from urllib.parse import quote
 import numpy as np
 
 from seaglass.bundle import bundle_hash, problems, read_bundle
+from seaglass.store import MAX_NOTES
 
 DEFAULT_URL = "http://localhost:8008"
 HEARTBEAT_S = 30.0
@@ -221,6 +222,7 @@ class Monitor:
         views: the project's bundle, a directory with a layout.json and the modules
             it names, which the run's pages are drawn with
         tags: labels for the run, as well as those in $SEAGLASS_TAGS (comma-separated)
+        notes: what the run is testing and why; else $SEAGLASS_NOTES
         heartbeat: seconds between heartbeats
     """
 
@@ -231,6 +233,7 @@ class Monitor:
         name: str | None = None,
         views: str | Path | None = None,
         tags: list[str] | None = None,
+        notes: str | None = None,
         heartbeat: float = HEARTBEAT_S,
     ):
         self.url = (url or os.environ.get("SEAGLASS_URL") or DEFAULT_URL).rstrip("/")
@@ -239,6 +242,11 @@ class Monitor:
         env_tags = os.environ.get("SEAGLASS_TAGS", "").split(",")
         self.tags = list(dict.fromkeys([*(tags or []), *(t.strip() for t in env_tags)]))
         self.tags = [t for t in self.tags if t]
+        self.notes = notes or os.environ.get("SEAGLASS_NOTES") or None
+        if self.notes and len(self.notes) > MAX_NOTES:
+            # too long, the server would refuse the run; better to keep the start
+            _log(f"notes cut to their first {MAX_NOTES} characters")
+            self.notes = self.notes[:MAX_NOTES]
         self.bundle = read_bundle(views) if views is not None else None
         for problem in problems(self.bundle) if self.bundle else []:
             _log(f"views: {problem}")
@@ -314,6 +322,7 @@ class Monitor:
                 "name": self.name,
                 "config": config or {},
                 "tags": self.tags,
+                "notes": self.notes,
                 "provenance": provenance(),
                 "bundle": self.bundle_hash,
                 "total": total,

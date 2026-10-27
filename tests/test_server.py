@@ -40,9 +40,14 @@ def test_a_run_round_trip(server: Server):
     )
     assert server.post(f"/api/runs/{run}/streams/s", [{"step": 2, "x": [1]}])[0] == 200
     assert server.post(f"/api/runs/{run}/activity", {"activity": "eval"})[0] == 200
+    assert server.post(f"/api/runs/{run}/notes", {"notes": "why"}) == (
+        200,
+        {"ok": True},
+    )
     meta = server.get(f"/api/runs/{run}")
     assert meta["step"] == 2 and meta["latest"] == {"loss": 0.5}
     assert meta["activity"] == "eval" and meta["config"] == {"lr": 1}
+    assert meta["notes"] == "why"
     assert server.get(f"/api/runs/{run}/metrics?since=0")["next"] == 1
     assert server.get(f"/api/runs/{run}/media")["rows"][0]["file"] == "ep/1.npz"
     assert server.get(f"/api/runs/{run}/streams/s")["rows"][0]["x"] == [1]

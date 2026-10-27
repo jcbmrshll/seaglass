@@ -202,6 +202,8 @@ class Handler(BaseHTTPRequestHandler):
                 store.append_stream(run_id, name, self._body_json())
             case ["api", "runs", run_id, "activity"]:
                 store.set_activity(run_id, self._body_json())
+            case ["api", "runs", run_id, "notes"]:
+                store.set_notes(run_id, self._body_json())
             case ["api", "runs", run_id, "finish"]:
                 store.finish(run_id, self._body_json())
             case _:

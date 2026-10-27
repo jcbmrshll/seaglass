@@ -40,6 +40,16 @@ async function api(path) {
   return res.json();
 }
 
+// POST a JSON body; a refusal throws with the server's reason
+async function post(path, body) {
+  const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!res.ok) {
+    const reason = await res.json().then((b) => b.error, () => null);
+    throw new Error(reason ?? `${res.status} ${path}`);
+  }
+  return res.json();
+}
+
 function setConnected(ok) {
   document.getElementById("conn").textContent = ok ? "" : "server unreachable";
 }
@@ -165,13 +175,13 @@ class RunList {
         (!f.project || r.project === f.project) &&
         (!f.tag || r.tags?.includes(f.tag)) &&
         (!f.branch || r.provenance?.git?.branch === f.branch) &&
-        (!f.q || `${r.name} ${r.id}`.toLowerCase().includes(f.q.toLowerCase())),
+        (!f.q || `${r.name} ${r.id} ${r.notes ?? ""}`.toLowerCase().includes(f.q.toLowerCase())),
     );
     const select = (key, name, options) =>
       h("label", {}, name, h("select", { onchange: (e) => this.setFilter(key, e.target.value) },
         h("option", { value: "", text: "all" }),
         options.map((o) => h("option", { value: o, text: o, selected: o === f[key] }))));
-    const search = h("input", { type: "search", placeholder: "name or id", value: f.q || null, onchange: (e) => this.setFilter("q", e.target.value) });
+    const search = h("input", { type: "search", placeholder: "name, id or notes", value: f.q || null, onchange: (e) => this.setFilter("q", e.target.value) });
 
     // each run's summary metrics: its bundle's patterns over what it logged
     const summaryOf = (r) => matchNames(summaries.get(r.bundle) ?? [], Object.keys(r.latest ?? {}));
@@ -189,7 +199,7 @@ class RunList {
       return h("tr", { class: "run", onclick: (e) => !e.target.closest("a") && go(`/run/${r.id}`) },
         h("td", {}, h("div", { class: "status", title: st }, h("span", { class: `dot ${st}` }), st)),
         h("td", {},
-          h("a", { class: "name", href: `/run/${r.id}`, "data-app": true, text: r.name }),
+          h("a", { class: "name", href: `/run/${r.id}`, "data-app": true, text: r.name, title: r.notes }),
           h("div", { class: "sub", text: activity(r, now) || r.id })),
         h("td", { class: "mono" }, h("a", { href: `/project/${encodeURIComponent(r.project)}`, "data-app": true, text: r.project, title: "compare the project's runs" })),
         h("td", {}, (r.tags ?? []).map((t) => h("span", { class: "chip", text: t }))),
@@ -314,7 +324,7 @@ class ProjectPage {
 
     const q = new URLSearchParams(location.search);
     const filter = h("input", {
-      type: "search", placeholder: "filter runs", value: q.get("q"), title: "words in a run's name, id or tags",
+      type: "search", placeholder: "filter runs", value: q.get("q"), title: "words in a run's name, id, tags or notes",
       oninput: (e) => this.setParams({ q: e.target.value || null }, { table: true, charts: true }),
     });
     const pick = (text, title, ids) => h("button", { text, title, onclick: () => this.setShown(ids()) });
@@ -620,7 +630,7 @@ class ProjectPage {
         h("td", { class: "who" },
           h("div", { class: "line1" },
             h("i", { class: "swatch", style: on ? swatchStyle(this.colorOf(r.id)) : null }),
-            h("a", { class: "name", href: `/run/${r.id}`, "data-app": true, text: r.name, title: `open ${r.name}` }),
+            h("a", { class: "name", href: `/run/${r.id}`, "data-app": true, text: r.name, title: r.notes ? `${r.name}: ${r.notes}` : `open ${r.name}` }),
             (r.tags ?? []).map((t) => h("span", { class: "chip", text: t }))),
           h("div", { class: "sub" }, h("span", { class: `dot ${st}`, title: st }), activity(r, now) || (wide ? r.id : `${st} · ${progress(r) || "no steps"}`))),
         wide && [h("td", { class: "mono", text: started(r.created) }), h("td", { class: "num", text: progress(r) })],
@@ -778,12 +788,14 @@ class RunPage {
       if (this.dead) return;
       setConnected(true);
       const changed = run.updated !== this.run.updated || run.status !== this.run.status;
+      const notesChanged = run.notes !== this.run.notes;
       this.run = run;
       this.metricsNext = metrics.next;
       this.mediaNext = media.next;
       this.rows.push(...metrics.rows);
       this.media.push(...media.rows);
       this.renderHead();
+      if (notesChanged) this.renderNotes();
       if (metrics.rows.length) {
         this.stepBar.update();
         this.panels.forEach((p) => p.metrics?.());
@@ -951,13 +963,16 @@ class RunPage {
 
   build() {
     this.head = h("div", { class: "runhead" });
+    // apart from the head, which is drawn again on every poll, so an edit isn't lost
+    this.notesEl = h("div", { class: "notes" });
     this.tabsEl = h("nav", { class: "tabs" });
     this.stepBar = stepBar(this);
     this.windowEl = h("span", { class: "scrub" });
     this.body = h("div", { class: "rows" });
-    this.pageEl = h("div", { class: "page" }, this.head, h("div", { class: "topbar" }, this.tabsEl, this.stepBar.el, h("span", { class: "spacer" }), this.windowEl), this.body);
+    this.pageEl = h("div", { class: "page" }, this.head, this.notesEl, h("div", { class: "topbar" }, this.tabsEl, this.stepBar.el, h("span", { class: "spacer" }), this.windowEl), this.body);
     main.replaceChildren(this.pageEl);
     this.renderHead();
+    this.renderNotes();
     this.renderTabs();
     this.renderWindow();
     this.renderTab();
@@ -990,6 +1005,52 @@ class RunPage {
         prov.cwd && h("span", { class: "dim", text: prov.cwd })),
       this.layout.note ? h("div", { class: "note", text: `drawn with the default layout: ${this.layout.note}` }) : "",
     );
+  }
+
+  // what the run is testing and why (SPEC.md §4.8), which the reader can write here
+  renderNotes() {
+    if (this.notesEditing) return;
+    const notes = this.run.notes;
+    this.notesEl.classList.toggle("none", !notes);
+    this.notesEl.replaceChildren(
+      notes ? h("div", { class: "text", text: notes }) : "",
+      h("button", { class: "edit", text: notes ? "edit notes" : "add notes", title: "what this run is testing and why", onclick: () => this.editNotes() }),
+    );
+  }
+
+  editNotes() {
+    this.notesEditing = true;
+    const box = h("textarea", { rows: 4, maxlength: 10000, placeholder: "what this run is testing, and why" });
+    box.value = this.run.notes ?? "";
+    const error = h("span", { class: "error" });
+    const close = () => {
+      this.notesEditing = false;
+      this.renderNotes();
+    };
+    const save = async () => {
+      const notes = box.value.trim() || null;
+      saveButton.disabled = true;
+      try {
+        await post(`/api/runs/${this.id}/notes`, { notes });
+        if (this.dead) return;
+        this.run = { ...this.run, notes };
+        close();
+      } catch (e) {
+        error.textContent = `not saved: ${e.message}`;
+        saveButton.disabled = false;
+      }
+    };
+    const saveButton = h("button", { class: "on", text: "save", onclick: save });
+    box.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") close();
+      else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) save();
+    });
+    this.notesEl.classList.remove("none");
+    this.notesEl.replaceChildren(box,
+      h("div", { class: "actions" },
+        saveButton, h("button", { text: "cancel", onclick: close }),
+        h("span", { class: "dim", text: "ctrl+enter saves, esc cancels" }), error));
+    box.focus();
   }
 
   renderTabs() {

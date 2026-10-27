@@ -33,6 +33,7 @@ STREAM = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}")
 TYPE = re.compile(r"[a-z0-9][a-z0-9_.-]*(/[a-z0-9][a-z0-9_.-]*)+")
 STATUS = re.compile(r"[a-z][a-z0-9_-]{0,31}")
 MAX_ACTIVITY = 500
+MAX_NOTES = 10000
 MAX_ATTRS = 64 * 1024
 MAX_TAGS = 32
 
@@ -154,6 +155,14 @@ def check_tags(tags: Any) -> list[str]:
     return tags
 
 
+def check_notes(notes: Any) -> str | None:
+    _check(
+        notes is None or (isinstance(notes, str) and len(notes) <= MAX_NOTES),
+        f"notes are null or a string of at most {MAX_NOTES} characters",
+    )
+    return notes
+
+
 class RunStore:
     def __init__(self, root: str | Path, max_file: int = 1 << 30):
         self.root = Path(root)
@@ -171,7 +180,10 @@ class RunStore:
         return path
 
     def _read_meta(self, run_dir: Path) -> dict[str, Any]:
-        return json.loads((run_dir / "meta.json").read_text())
+        meta = json.loads((run_dir / "meta.json").read_text())
+        # runs stored before notes existed have none
+        meta.setdefault("notes", None)
+        return meta
 
     def _write_meta(self, run_dir: Path, meta: dict[str, Any]) -> None:
         tmp = run_dir / "meta.json.tmp"
@@ -214,6 +226,7 @@ class RunStore:
         provenance = _given(body, "provenance", {})
         _check(isinstance(provenance, dict), "provenance is a JSON object")
         tags = check_tags(_given(body, "tags", []))
+        notes = check_notes(body.get("notes"))
         bundle = body.get("bundle")
         _check(
             bundle is None
@@ -244,6 +257,7 @@ class RunStore:
                 "activity": None,
                 "activity_since": None,
                 "tags": tags,
+                "notes": notes,
                 "provenance": provenance,
                 "bundle": bundle,
                 "config": config,
@@ -373,6 +387,16 @@ class RunStore:
             if meta.get("activity") != activity:
                 meta["activity"] = activity
                 meta["activity_since"] = now if activity is not None else None
+            self._write_meta(run_dir, meta)
+
+    def set_notes(self, run_id: str, body: Any) -> None:
+        run_dir = self._dir(run_id)
+        _check(isinstance(body, dict) and "notes" in body, "{notes} is needed")
+        notes = check_notes(body["notes"])
+        # notes are about the run, not from it: the run's updated stays as it was
+        with self.lock:
+            meta = self._read_meta(run_dir)
+            meta["notes"] = notes
             self._write_meta(run_dir, meta)
 
     def finish(self, run_id: str, body: Any) -> None:
