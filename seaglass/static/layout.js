@@ -19,9 +19,9 @@ export const DEFAULT_TABS = [
 // The layout to draw a run with: its bundle's, or the default (§8.5) when it has none,
 // or one this frontend can't run. `note` says why the default is used, if it is.
 export function resolveLayout(layout) {
-  if (!layout) return { renderers: {}, summary: [], tabs: DEFAULT_TABS, usable: false, note: null };
+  if (!layout) return { renderers: {}, summary: [], descriptions: [], tabs: DEFAULT_TABS, usable: false, note: null };
   if (layout.contract !== CONTRACT) {
-    return { renderers: {}, summary: [], tabs: DEFAULT_TABS, usable: false, note: `its views target contract ${layout.contract}, and this page runs contract ${CONTRACT}` };
+    return { renderers: {}, summary: [], descriptions: [], tabs: DEFAULT_TABS, usable: false, note: `its views target contract ${layout.contract}, and this page runs contract ${CONTRACT}` };
   }
   const summary = Array.isArray(layout.summary) ? layout.summary : [];
   let tabs = Array.isArray(layout.tabs) && layout.tabs.length ? layout.tabs : null;
@@ -32,7 +32,14 @@ export function resolveLayout(layout) {
       rows: t.rows.map((row) => row.map((p) => (p.type === "tiles" && summary.length ? { type: "tiles" } : p))),
     }));
   }
-  return { renderers: layout.renderers ?? {}, summary, tabs, usable: true, note: null };
+  return { renderers: layout.renderers ?? {}, summary, descriptions: descriptionList(layout.descriptions), tabs, usable: true, note: null };
+}
+
+// a layout's descriptions (§8.1) as [pattern, text] pairs, in the order listed; text
+// that isn't a string, or is blank, describes nothing
+export function descriptionList(descriptions) {
+  if (!descriptions || typeof descriptions !== "object" || Array.isArray(descriptions)) return [];
+  return Object.entries(descriptions).filter(([, t]) => typeof t === "string" && t.trim()).map(([p, t]) => [p, t.trim()]);
 }
 
 // ---------------------------------------------------------------- patterns
@@ -125,6 +132,35 @@ export function splitGroups(names, named = null) {
     // max, mean, min first, then the rest as they came (sort is stable)
     series: series.sort((a, b) => (rank[a.name] ?? 3) - (rank[b.name] ?? 3)),
   }));
+}
+
+// ---------------------------------------------------------------- descriptions
+
+// what a metric or media key is, by the first description whose pattern matches it;
+// null if none does
+export function describe(list, name) {
+  for (const [p, text] of list ?? []) if (globRegex(p).test(name)) return text;
+  return null;
+}
+
+// what a chart card explains of the metrics it draws, as [{names, text}]: the
+// description of the card's name, if no series has that name, then each series' (series
+// that share one listed together); `names` is empty for what's about the whole card,
+// as is a description every series shares
+export function chartNotes(list, group) {
+  const notes = [];
+  const series = group.series ?? [];
+  const own = group.name && !series.some((s) => s.key === group.name) ? describe(list, group.name) : null;
+  if (own) notes.push({ names: [], text: own });
+  for (const s of series) {
+    const text = describe(list, s.key);
+    if (!text || text === own) continue;
+    const same = notes.find((n) => n.text === text && n.names.length);
+    if (same) same.names.push(s.name);
+    else notes.push({ names: [s.name], text });
+  }
+  for (const n of notes) if (n.names.length === series.length) n.names = [];
+  return notes;
 }
 
 // ---------------------------------------------------------------- metrics

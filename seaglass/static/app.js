@@ -6,7 +6,7 @@
 import { h } from "./dom.js";
 import { activity, ago, duration, fmt, progress, started, status } from "./format.js";
 import {
-  CONTRACT, applyNavigate, entriesByKey, entryIndexAt, locationQuery, matchNames, mediaColumns, metricNames,
+  CONTRACT, applyNavigate, chartNotes, describe, descriptionList, entriesByKey, entryIndexAt, locationQuery, matchNames, mediaColumns, metricNames,
   parseLocation, resolveLayout, seriesPoints, smooth, splitGroups, valueAt,
 } from "./layout.js";
 import { SERIES, hideTip, lineChart, swatchStyle } from "./chart.js";
@@ -68,6 +68,68 @@ function bundleLayout(hash) {
   return layouts.get(hash);
 }
 
+// ---------------------------------------------------------------- descriptions
+
+// what a metric or media key is (SPEC.md §8.1), shown beside it by a button that opens
+// it: one open at a time, as {id, anchor, notes}. Cards are redrawn as a run logs, so
+// a button drawn again with the same id takes the open one over.
+let openNote = null;
+
+// a button that opens notes ([{names, text}], or one text) beside it; null if there are
+// none
+function noteButton(id, notes) {
+  if (typeof notes === "string") notes = [{ names: [], text: notes }];
+  if (!notes?.length) return null;
+  const open = openNote?.id === id;
+  const btn = h("button", {
+    class: `info${open ? " on" : ""}`, text: "i", title: "what this is", "aria-label": "what this is",
+    "aria-controls": "note", "aria-expanded": String(open),
+    onclick: (e) => {
+      e.stopPropagation();
+      if (openNote?.id === id) closeNote();
+      else showNote(id, btn, notes);
+    },
+  });
+  if (open) openNote.anchor = btn;
+  return btn;
+}
+
+function showNote(id, anchor, notes) {
+  closeNote();
+  const el = document.getElementById("note");
+  el.replaceChildren(...notes.map((n) => h("p", {}, n.names.length > 0 && h("b", { text: n.names.join(", ") }), n.text)));
+  el.hidden = false;
+  openNote = { id, anchor };
+  anchor.classList.add("on");
+  anchor.setAttribute("aria-expanded", "true");
+  placeNote();
+}
+
+function closeNote() {
+  if (!openNote) return;
+  openNote.anchor.classList.remove("on");
+  openNote.anchor.setAttribute("aria-expanded", "false");
+  openNote = null;
+  document.getElementById("note").hidden = true;
+}
+
+// under its button, or over it where there's no room below, and inside the window
+function placeNote() {
+  if (!openNote) return;
+  if (!openNote.anchor.isConnected) return closeNote();
+  const el = document.getElementById("note");
+  const a = openNote.anchor.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  const below = a.bottom + 6 + r.height <= innerHeight - 4;
+  el.style.left = `${Math.max(4, Math.min(innerWidth - r.width - 4, a.left - 8))}px`;
+  el.style.top = `${below ? a.bottom + 6 : Math.max(4, a.top - 6 - r.height)}px`;
+}
+
+document.addEventListener("click", (e) => openNote && !e.target.closest?.("#note") && closeNote());
+document.addEventListener("keydown", (e) => e.key === "Escape" && closeNote());
+main.addEventListener("scroll", placeNote, { passive: true });
+addEventListener("resize", placeNote);
+
 // ---------------------------------------------------------------- routing
 
 let page = null;
@@ -94,6 +156,7 @@ function show() {
   }
   page?.destroy();
   hideTip();
+  closeNote();
   const make = { run: () => new RunPage(r.id), project: () => new ProjectPage(r.project), projects: () => new ProjectList(), list: () => new RunList() };
   page = make[r.name]();
   // the header's link to the kind of page shown
@@ -315,6 +378,7 @@ class ProjectPage {
     main.className = "";
     this.runs = null;
     this.summary = [];
+    this.descriptions = [];
     // each run's config, flattened: a run's config never changes, so it is read once
     this.configs = new Map();
     // each run's metrics read so far, as {rows, next, updated}, for the runs shown
@@ -517,11 +581,12 @@ class ProjectPage {
     this.projectSelect.disabled = names.length < 2;
   }
 
-  // the summary patterns of the runs' bundles, newest first
+  // the summary patterns and descriptions of the runs' bundles, newest first
   async loadSummary() {
     const hashes = [...new Set(this.runs.map((r) => r.bundle).filter(Boolean))];
-    const layouts = await Promise.all(hashes.map(bundleLayout));
-    this.summary = [...new Set(layouts.flatMap((l) => (l?.contract === CONTRACT && Array.isArray(l.summary) ? l.summary : [])))];
+    const layouts = (await Promise.all(hashes.map(bundleLayout))).filter((l) => l?.contract === CONTRACT);
+    this.summary = [...new Set(layouts.flatMap((l) => (Array.isArray(l.summary) ? l.summary : [])))];
+    this.descriptions = layouts.flatMap((l) => descriptionList(l.descriptions));
   }
 
   // the configs not read yet: the run list leaves them out
@@ -669,7 +734,7 @@ class ProjectPage {
       });
       const holder = h("div", { class: "chart-holder" });
       const card = h("div", { class: "card chart-card" },
-        h("div", { class: "card-hdr" }, h("span", { class: "title", text: label(key), title: key })),
+        h("div", { class: "card-hdr" }, h("span", { class: "title", text: label(key), title: key }), noteButton(`compare:${key}`, describe(this.descriptions, key))),
         holder);
       // drawn once the card is laid out, so the chart knows its width
       requestAnimationFrame(() => {
@@ -1092,6 +1157,7 @@ class RunPage {
   renderTab() {
     this.clearPanels();
     hideTip();
+    closeNote();
     const tab = this.layout.tabs[this.tabIndex()];
     const fill = !!tab.panel;
     main.classList.toggle("fill", fill);
@@ -1181,7 +1247,10 @@ const PANELS = {
     const draw = () => {
       let names = matchNames(panel.metrics ?? page.layout.summary, metricNames(page.rows));
       if (panel.max) names = names.slice(0, panel.max);
-      el.replaceChildren(...names.map((k) => h("div", { class: "tile", title: k }, h("div", { class: "lab", text: label(k) }), h("div", { class: "val", text: fmt(page.valueAt(k)) }))));
+      el.replaceChildren(...names.map((k) =>
+        h("div", { class: "tile" },
+          h("div", { class: "lab" }, h("span", { text: label(k), title: k }), noteButton(`tile:${k}`, describe(page.layout.descriptions, k))),
+          h("div", { class: "val", text: fmt(page.valueAt(k)) }))));
       el.hidden = !names.length;
     };
     draw();
@@ -1297,6 +1366,7 @@ function chartCard(page, panel, group, from, updates) {
   const card = h("div", { class: "card chart-card" },
     h("div", { class: "card-hdr" },
       h("span", { class: "title", text: label(group.name), title: group.name }),
+      noteButton(`chart:${group.name}:${group.series.map((s) => s.key).join(",")}`, chartNotes(page.layout.descriptions, group)),
       h("span", { class: "spacer" }),
       single && h("span", { class: "latest" }, values[0])),
     !single && h("div", { class: "legend" }, series.map((s, i) => h("span", { class: "key" }, h("i", { style: `background:${s.color}` }), s.name, values[i]))),
@@ -1339,6 +1409,7 @@ function mediaCard(page, key) {
     const entry = entries[idx];
     hdr.replaceChildren(
       h("span", { class: "title", text: label(key), title: key }),
+      noteButton(`media:${key}`, describe(page.layout.descriptions, key)),
       h("span", { class: "spacer" }),
       h("span", { class: "scrub" },
         h("button", { text: "‹", title: "previous", disabled: idx === 0, onclick: () => pick(idx - 1) }),

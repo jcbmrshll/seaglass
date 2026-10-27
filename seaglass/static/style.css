@@ -290,7 +290,8 @@ button.eye[aria-pressed="false"] { color: var(--sg-faint); }
 
 .tiles { display: flex; flex-wrap: wrap; gap: 10px; }
 .tile { flex: 1 1 120px; max-width: 240px; background: var(--sg-panel); border: 1px solid var(--sg-edge); padding: 7px 11px 8px; }
-.tile .lab { font-size: 10.5px; color: var(--sg-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile .lab { display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--sg-dim); }
+.tile .lab span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tile .val { font: 600 17px var(--sg-mono); color: var(--sg-fg-strong); margin-top: 1px; }
 
 /* cards */
@@ -359,6 +360,38 @@ iframe.module-frame { display: block; width: 100%; border: 0; }
 .config-grid td:first-child { color: var(--sg-dim); white-space: nowrap; }
 .config-grid td:last-child { color: var(--sg-fg); word-break: break-word; }
 .config-grid .card-hdr { padding-bottom: 5px; }
+
+/* a metric's description: its button, and what it opens */
+
+button.info {
+  flex: none;
+  align-self: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border-radius: 50%;
+  border-color: var(--sg-faint);
+  background: none;
+  font: italic 600 10px/12px var(--serif);
+  color: var(--sg-dim);
+}
+button.info:hover:not(:disabled) { background: var(--hover); color: var(--sg-fg-strong); border-color: var(--sg-dim); }
+button.info.on { background: var(--sel); border-color: var(--sg-accent); color: var(--sg-accent); }
+
+#note {
+  position: fixed;
+  z-index: 11;
+  max-width: min(360px, calc(100vw - 8px));
+  background: var(--raise);
+  border: 1px solid var(--sg-edge);
+  box-shadow: 0 4px 16px var(--shadow);
+  padding: 7px 10px;
+  font: 12px/1.45 var(--sg-font);
+  color: var(--sg-fg);
+}
+#note p { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
+#note p + p { margin-top: 6px; }
+#note b { font: 600 11px var(--sg-mono); color: var(--sg-fg-strong); margin-right: 6px; }
 
 /* tooltip */
 

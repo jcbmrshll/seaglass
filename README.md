@@ -125,6 +125,10 @@ page (SPEC.md §8):
   "contract": 1,
   "renderers": {"gridworld/episode": "episode.js"},
   "summary": ["mean_return", "success"],
+  "descriptions": {
+    "*_return": "Return per episode, undiscounted: +1 at the goal, -0.01 a step.",
+    "success": "The share of the epoch's episodes that reached the goal."
+  },
   "tabs": [
     {"title": "Training", "rows": [
       [{"type": "tiles", "metrics": ["mean_return", "success"]}],
@@ -152,6 +156,12 @@ A `split` chart draws one chart per group of metrics (`loss/policy` and `loss/va
 together, `min_X`/`mean_X`/`max_X` together); its `groups` names more, as
 `"groups": {"avg_outcome": "*_avg_outcome"}` charts every `<name>_avg_outcome`
 together, with a series per `<name>`.
+
+`descriptions` says what metrics are, by pattern, the first that matches a metric
+describing it. The run and project pages put an ⓘ by each metric described (on its
+tile, its chart, its media card) that shows the text. That's the place to explain a
+metric that isn't obvious from its name: what it measures, and what a good value
+looks like.
 
 A row's panels share its width by their `width`. A tab with a single `panel` gives a
 view the whole page. Anything beyond this vocabulary belongs in a custom view.
