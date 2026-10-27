@@ -84,6 +84,8 @@ test("location in the address", () => {
   assert.deepEqual(next, { tab: "Values", step: null, state: { x: "a b", y: "3" } });
   assert.deepEqual(applyNavigate(loc, {}), loc);
   assert.equal(applyNavigate(loc, { tab: null }).tab, null);
+  // replace is about history, not part of the location
+  assert.deepEqual(applyNavigate(loc, { state: { genome: "13" }, replace: true }), { ...loc, state: { ...loc.state, genome: "13" } });
 });
 
 test("layouts", () => {

@@ -847,11 +847,12 @@ class RunPage {
   }
 
   navigate(req) {
-    if (!req || typeof req !== "object") throw new Error("navigate takes {tab, step, state}");
+    if (!req || typeof req !== "object") throw new Error("navigate takes {tab, step, state, replace}");
     if ("tab" in req && req.tab != null && !this.layout.tabs.some((t) => t.title === req.tab)) throw new Error(`no tab ${req.tab}`);
     const next = applyNavigate(this.loc, req);
-    // a new tab or view state is somewhere to come back to; a step isn't
-    const push = ("tab" in req && next.tab !== this.loc.tab) || "state" in req;
+    // a new tab or view state is somewhere to come back to, unless the module says
+    // it isn't; a step isn't
+    const push = !req.replace && (("tab" in req && next.tab !== this.loc.tab) || "state" in req);
     this.setLocation(next, { push });
   }
 
