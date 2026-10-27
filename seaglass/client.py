@@ -88,7 +88,8 @@ class Arrays:
                 a = a.astype(np.int32)
             if a.dtype.kind not in "biuf":
                 raise TypeError(f"{name} is {a.dtype}, not numbers")
-            out[name] = np.ascontiguousarray(a, dtype=a.dtype.newbyteorder("<"))
+            # not ascontiguousarray, which makes 0-d arrays 1-d
+            out[name] = np.asarray(a, dtype=a.dtype.newbyteorder("<"), order="C")
         buf = io.BytesIO()
         np.savez_compressed(buf, **out)  # pyright: ignore[reportArgumentType]
         return buf.getvalue()

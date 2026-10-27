@@ -205,3 +205,38 @@ def test_helpers():
     assert Arrays(x=np.array([2**40], np.int64)).encode()[:2] == b"PK"
     loaded = np.load(io.BytesIO(Arrays(x=np.array([2**40], np.int64)).encode()))
     assert loaded["x"].dtype == np.int64
+
+
+def test_arrays_keep_their_shapes():
+    a = Arrays(
+        agent=np.int32(1),
+        done=np.bool_(True),
+        f=np.float32(0.5),
+        n=3,
+        big=np.int64(2**40),
+        v=np.arange(3),
+        m=np.ones((2, 3), ">f4").T,
+    )
+    with np.load(io.BytesIO(a.encode())) as z:
+        got = {k: z[k] for k in z.files}
+    assert {k: v.shape for k, v in got.items()} == {
+        "agent": (),
+        "done": (),
+        "f": (),
+        "n": (),
+        "big": (),
+        "v": (3,),
+        "m": (3, 2),
+    }
+    assert {k: v.dtype.str for k, v in got.items()} == {
+        "agent": "<i4",
+        "done": "|b1",
+        "f": "<f4",
+        "n": "<i4",
+        "big": "<i8",
+        "v": "<i4",
+        "m": "<f4",
+    }
+    assert got["agent"].item() == 1 and got["done"].item() is True
+    assert got["n"].item() == 3 and got["big"].item() == 2**40
+    assert not np.isfortran(got["m"]) and (got["m"] == 1).all()
