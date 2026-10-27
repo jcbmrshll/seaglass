@@ -17,6 +17,7 @@
                       "activity": null,
                       "activity_since": null,
                       "tags": [],
+                      "notes": null,
                       "provenance": {},
                       "bundle": null,
                       "config": {}
@@ -32,16 +33,18 @@
          "project": "conformance", "name": "run {{nonce}}",
          "config": {"lr": 0.0003, "net": {"layers": [64, 64]}, "fn": "relu"},
          "tags": ["sweep-3", "conformance"],
+         "notes": "does warmup help {{nonce}}?\nsecond line",
          "provenance": {"git": {"commit": "abc123", "branch": "dev", "dirty": false}, "host": "gpu-box", "argv": ["train.py"], "cwd": "/work"},
          "total": 300}},
        "response": {"status": 201, "json": {
          "id": {"$capture": "run"}, "project": "conformance", "name": "run {{nonce}}",
          "config": {"$exact": {"lr": 0.0003, "net": {"layers": [64, 64]}, "fn": "relu"}},
          "tags": ["sweep-3", "conformance"],
+         "notes": "does warmup help {{nonce}}?\nsecond line",
          "provenance": {"$exact": {"git": {"commit": "abc123", "branch": "dev", "dirty": false}, "host": "gpu-box", "argv": ["train.py"], "cwd": "/work"}},
          "total": 300}}},
       {"request": {"method": "GET", "path": "/api/runs/{{run}}"},
-       "response": {"status": 200, "json": {"name": "run {{nonce}}", "tags": ["sweep-3", "conformance"], "total": 300, "config": {"net": {"layers": [64, 64]}}}}}
+       "response": {"status": 200, "json": {"name": "run {{nonce}}", "tags": ["sweep-3", "conformance"], "notes": "does warmup help {{nonce}}?\nsecond line", "total": 300, "config": {"net": {"layers": [64, 64]}}}}}
     ]
   },
   {
@@ -68,6 +71,8 @@
       {"request": {"method": "POST", "path": "/api/runs", "json": {"config": [1, 2]}},
        "response": {"status": 400}},
       {"request": {"method": "POST", "path": "/api/runs", "json": {"total": 2.5}},
+       "response": {"status": 400}},
+      {"request": {"method": "POST", "path": "/api/runs", "json": {"notes": ["a"]}},
        "response": {"status": 400}},
       {"request": {"method": "POST", "path": "/api/runs", "json": [1]},
        "response": {"status": 400}},

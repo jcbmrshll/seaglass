@@ -82,6 +82,6 @@ export function assignSlots(prev, ids) {
 
 // whether a run matches the page's filter: words, each in its name, id or tags
 export function runMatches(run, q) {
-  const text = `${run.name} ${run.id} ${(run.tags ?? []).join(" ")}`.toLowerCase();
+  const text = `${run.name} ${run.id} ${(run.tags ?? []).join(" ")} ${run.notes ?? ""}`.toLowerCase();
   return q.toLowerCase().split(/\s+/).filter(Boolean).every((w) => text.includes(w));
 }

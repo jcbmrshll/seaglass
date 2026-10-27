@@ -23,6 +23,31 @@
     ]
   },
   {
+    "name": "notes are replaced, changing nothing else",
+    "steps": [
+      {"request": {"method": "POST", "path": "/api/runs", "json": {"project": "conformance", "notes": "first"}},
+       "response": {"status": 201, "json": {"id": {"$capture": "run"}, "notes": "first"}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/finish", "json": {}},
+       "response": {"status": 200}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}"},
+       "response": {"status": 200, "json": {"updated": {"$capture": "updated"}}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/notes", "json": {"notes": "first\n\nand after the fact {{nonce}}"}},
+       "response": {"status": 200, "json": {"ok": true}}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}"},
+       "response": {"status": 200, "json": {"notes": "first\n\nand after the fact {{nonce}}", "status": "finished", "updated": {"$var": "updated"}}}},
+      {"request": {"method": "GET", "path": "/api/runs"},
+       "response": {"status": 200, "json": {"$contains": [{"id": {"$var": "run"}, "notes": "first\n\nand after the fact {{nonce}}"}]}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/notes", "json": {"notes": null}},
+       "response": {"status": 200}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}"},
+       "response": {"status": 200, "json": {"notes": null}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/notes", "json": {"notes": 3}},
+       "response": {"status": 400, "json": {"error": {"$type": "string"}}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/notes", "json": {}},
+       "response": {"status": 400}}
+    ]
+  },
+  {
     "name": "finishing sets the status and clears the activity",
     "steps": [
       {"request": {"method": "POST", "path": "/api/runs", "json": {"project": "conformance"}},

@@ -24,11 +24,27 @@ def test_start_records_the_run(server: Server, monkeypatch):
     meta = server.get(f"/api/runs/{m.run_id}")
     assert meta["project"] == "test" and meta["name"] == "named" and meta["total"] == 9
     assert meta["tags"] == ["a", "sweep", "b"]
+    assert meta["notes"] is None
     # functions are named, arrays are lists
     assert meta["config"] == {"lr": 0.1, "fn": "len", "arr": [0, 1, 2]}
     prov = meta["provenance"]
     assert set(prov) >= {"git", "host", "argv", "cwd", "python"}
     assert prov["git"] is None or set(prov["git"]) == {"commit", "branch", "dirty"}
+    m.finish()
+
+
+def test_notes_are_passed_or_from_the_environment(server: Server, monkeypatch, capsys):
+    monkeypatch.setenv("SEAGLASS_NOTES", "from the launcher")
+    m = started(server)
+    assert server.get(f"/api/runs/{m.run_id}")["notes"] == "from the launcher"
+    m.finish()
+    m = started(server, notes="from the script")
+    assert server.get(f"/api/runs/{m.run_id}")["notes"] == "from the script"
+    m.finish()
+    # notes too long for the server are cut, rather than the run not starting
+    m = started(server, notes="x" * 20000)
+    assert server.get(f"/api/runs/{m.run_id}")["notes"] == "x" * 10000
+    assert "notes cut" in capsys.readouterr().err
     m.finish()
 
 

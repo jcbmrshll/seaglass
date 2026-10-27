@@ -23,6 +23,7 @@ def test_create_defaults(store: RunStore):
     assert meta["project"] == "default"
     assert meta["status"] == "running"
     assert meta["step"] is None and meta["latest"] == {} and meta["tags"] == []
+    assert meta["notes"] is None
     assert meta["name"].endswith("-1")
     # the next run of the project is numbered after it
     assert store.create({})["name"].endswith("-2")
@@ -43,6 +44,8 @@ def test_create_defaults(store: RunStore):
         {"total": True},
         {"config": 3},
         {"provenance": []},
+        {"notes": 3},
+        {"notes": "x" * 10001},
     ],
 )
 def test_create_invalid(store: RunStore, body):
@@ -170,6 +173,36 @@ def test_activity_and_finish(store: RunStore):
             store.finish(run, bad)
     with pytest.raises(Invalid):
         store.set_activity(run, {"activity": "x" * 501})
+
+
+def test_notes(store: RunStore):
+    meta = store.create({"notes": "does warmup help?"})
+    run = meta["id"]
+    assert meta["notes"] == "does warmup help?"
+    store.finish(run, {})
+    before = store.get(run)
+    store.set_notes(run, {"notes": "does warmup help?\n\nit doesn't"})
+    after = store.get(run)
+    assert after["notes"] == "does warmup help?\n\nit doesn't"
+    # notes are about the run, not from it: it isn't running again, nor updated
+    assert after["status"] == "finished" and after["updated"] == before["updated"]
+    store.set_notes(run, {"notes": None})
+    assert store.get(run)["notes"] is None
+    for bad in [{}, {"notes": 1}, {"notes": "x" * 10001}, []]:
+        with pytest.raises(Invalid):
+            store.set_notes(run, bad)
+    with pytest.raises(NotFound):
+        store.set_notes("20990101-000000-dead", {"notes": "x"})
+
+
+def test_runs_stored_before_notes_have_none(store: RunStore):
+    run = store.create({})["id"]
+    path = store.root / run / "meta.json"
+    meta = json.loads(path.read_text())
+    del meta["notes"]
+    path.write_text(json.dumps(meta))
+    assert store.get(run)["notes"] is None
+    assert store.list()[0]["notes"] is None
 
 
 def test_list_skips_what_isnt_a_run(store: RunStore):

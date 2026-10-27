@@ -48,7 +48,11 @@ Pages poll while they're open, so a running run updates live.
 from seaglass import Arrays, Monitor, Row
 
 # the server is $SEAGLASS_URL, else localhost:8008
-monitor = Monitor(project="gridworld", views="views/")
+monitor = Monitor(
+    project="gridworld",
+    views="views/",
+    notes="does a smaller lr fix the late collapse?",
+)
 monitor.start(config={"lr": 3e-4}, total=300)
 for step in range(300):
     monitor.activity(f"epoch {step}: training")
@@ -86,10 +90,16 @@ What `log` takes:
 | `Row(**fields)` | a row of the stream named by the key |
 
 At start the client also records provenance: git commit, branch and dirty flag, host,
-argv and cwd. Two environment variables apply to every run:
+argv and cwd. Three environment variables apply to every run:
 
 - `SEAGLASS_URL`: the server, used when none is passed.
 - `SEAGLASS_TAGS`: comma-separated labels attached to the run.
+- `SEAGLASS_NOTES`: the run's notes, when none are passed, so you can say what a
+  run is for as you launch it: `SEAGLASS_NOTES="lr warmup, 2x batch" python train.py`.
+
+A run's **notes** say what it is testing and why. They show at the top of its page,
+where you can also write or edit them later (to record what the run turned out to
+show, say), and the run list searches them.
 
 [`examples/gridworld`](examples/gridworld) is a complete example: tabular Q-learning
 whose episodes are drawn by its own bundle.

@@ -96,6 +96,7 @@ A run's meta is a JSON object:
 | `activity` | string \| null | what the run says it is doing now |
 | `activity_since` | time \| null | when `activity` last changed |
 | `tags` | string[] | |
+| `notes` | string \| null | what the run is testing and why, in the words of whoever started it (§4.8) |
 | `provenance` | object | where the run came from (§3.2) |
 | `bundle` | string \| null | the hash of the run's bundle |
 | `config` | object | the run's configuration, as the client sent it |
@@ -135,6 +136,7 @@ by branch.
   "name": null,
   "config": {"lr": 0.0003},
   "tags": ["sweep-3"],
+  "notes": "does warmup still help at this batch size?",
   "provenance": {"git": null, "host": "gpu-box", "argv": [], "cwd": "/"},
   "bundle": "9c1e…",
   "total": 300
@@ -142,7 +144,8 @@ by branch.
 ```
 
 Every field is optional: `project` defaults to `default`, `config` and
-`provenance` to `{}` and `tags` to `[]`. `bundle` need not have been uploaded (a run
+`provenance` to `{}`, `tags` to `[]` and `notes` to `null`. `notes` is a string of
+at most 10000 characters. `bundle` need not have been uploaded (a run
 must not fail to start because its views did); a frontend then draws the run
 without it.
 
@@ -235,7 +238,20 @@ sets `updated`.
 
 `200`, `{"ok": true}`.
 
-### 4.8 Bundles: `GET /api/bundles/{hash}`, `PUT /api/bundles/{hash}`
+### 4.8 Notes: `POST /api/runs/{id}/notes`
+
+```json
+{"notes": "does warmup still help at this batch size? (it doesn't)"}
+```
+
+`notes` is a string of at most 10000 characters, or `null` to clear them. The server
+replaces the run's notes. Notes are about the run rather than from it, and are often
+written from a frontend, after the fact: setting them changes nothing else, not
+`updated` nor `status`.
+
+`200`, `{"ok": true}`.
+
+### 4.9 Bundles: `GET /api/bundles/{hash}`, `PUT /api/bundles/{hash}`
 
 A client checks whether the server has a bundle with `GET`, which answers `404`, or
 `200` with:
@@ -657,8 +673,10 @@ SHOULD do the same.
 - The server is the URL passed, else the environment variable `SEAGLASS_URL`, else
   `http://localhost:8008`.
 - Tags are those passed, plus the comma-separated `SEAGLASS_TAGS`.
+- Notes are those passed, else `SEAGLASS_NOTES`, so whoever launches a run can say
+  what it is for without editing the script.
 - At start it records provenance (§3.2), hashes its bundle directory, uploads the
-  bundle if the server lacks it (§4.8), and creates the run (§4.1).
+  bundle if the server lacks it (§4.9), and creates the run (§4.1).
 - Logging never raises and never blocks training: values are queued and sent in
   order by a background thread. If the server cannot be reached, the client says so
   once and drops what it cannot send; when the server comes back, it says so and
@@ -672,8 +690,8 @@ The basic frontend that ships with the reference server polls: the run list ever
 5 seconds, a run's meta, metrics and media every 2 seconds, reading incrementally
 (§2), while its page is visible. It has:
 
-- a **run list**, filterable by project, tag and branch, with each run's status,
-  progress, activity and summary metrics;
+- a **run list**, filterable by project, tag and branch, and searchable by name, id
+  and notes, with each run's status, progress, activity and summary metrics;
 - a **project list**, `/projects`: each project, with how many runs it has, how
   many are running, when it was last active and its newest run;
 - a **project page**, `/project/<project>`, that compares the project's runs: the
@@ -684,7 +702,8 @@ The basic frontend that ships with the reference server polls: the run list ever
   expanded, and the charts' metric patterns, smoothing and scale. It reads only what
   §5 offers: the run list, each run's meta (for its config) and the metrics of the
   runs turned on;
-- a **run page**: a header (name, status, activity, provenance), a step bar that
+- a **run page**: a header (name, status, activity, provenance, and the notes,
+  which the reader can write or edit there, §4.8), a step bar that
   sets the location's step (§7.6), and the run's layout (§8), loading the run's
   bundle and running its modules as §7 describes. Clicking a chart picks a step.
   The page's address holds the location: `/run/<id>?tab=…&step=…&<state>…`, where
