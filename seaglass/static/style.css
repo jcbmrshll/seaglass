@@ -292,6 +292,8 @@ button.eye[aria-pressed="false"] { color: var(--sg-faint); }
 .grid { display: grid; gap: 10px; }
 .grid.charts { grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); }
 .grid.media { grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); }
+/* a layout's columns: at most --cols cards a row, fewer where they'd be under 380px */
+.grid.media.cols { grid-template-columns: repeat(auto-fit, minmax(min(100%, max(380px, (100% - (var(--cols) - 1) * 10px) / var(--cols))), 1fr)); }
 
 /* charts */
 

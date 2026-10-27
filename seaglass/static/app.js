@@ -6,7 +6,7 @@
 import { h } from "./dom.js";
 import { activity, ago, duration, fmt, progress, started, status } from "./format.js";
 import {
-  CONTRACT, applyNavigate, entriesByKey, entryIndexAt, locationQuery, matchNames, metricNames,
+  CONTRACT, applyNavigate, entriesByKey, entryIndexAt, locationQuery, matchNames, mediaColumns, metricNames,
   parseLocation, resolveLayout, seriesPoints, smooth, splitGroups, valueAt,
 } from "./layout.js";
 import { SERIES, hideTip, lineChart, swatchStyle } from "./chart.js";
@@ -1154,6 +1154,11 @@ const PANELS = {
   media(page, slot, panel) {
     titled(slot, panel.title);
     const el = h("div", { class: "grid media" });
+    const columns = mediaColumns(panel);
+    if (columns) {
+      el.classList.add("cols");
+      el.style.setProperty("--cols", columns);
+    }
     slot.append(el);
     const cards = new Map();
     const draw = () => {

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  applyNavigate, entriesByKey, entryIndexAt, globRegex, locationQuery, logTicks, matchNames,
+  applyNavigate, entriesByKey, entryIndexAt, globRegex, locationQuery, logTicks, matchNames, mediaColumns,
   metricNames, niceTicks, parseLocation, resolveLayout, seriesPoints, smooth, splitGroups, valueAt,
 } from "../../seaglass/static/layout.js";
 
@@ -100,4 +100,13 @@ test("layouts", () => {
   assert.deepEqual(noTabs.tabs[0].rows[0], [{ type: "tiles" }]);
   const own = resolveLayout({ contract: 1, tabs: [{ title: "T", panel: { type: "view", module: "v.js" } }] });
   assert.equal(own.tabs[0].panel.module, "v.js");
+});
+
+test("media columns", () => {
+  assert.equal(mediaColumns({ type: "media", keys: ["*"] }), null);
+  assert.equal(mediaColumns({ columns: 1 }), 1);
+  assert.equal(mediaColumns({ columns: 3 }), 3);
+  // anything but an integer >= 1 is the frontend's choice
+  for (const columns of [0, -2, 1.5, "2", null, true, NaN, Infinity]) assert.equal(mediaColumns({ columns }), null);
+  assert.equal(mediaColumns(undefined), null);
 });
