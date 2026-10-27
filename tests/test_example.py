@@ -8,7 +8,7 @@ from .conftest import Server
 EXAMPLE = Path(__file__).parents[1] / "examples" / "gridworld"
 
 
-def test_gridworld_logs_a_run_with_its_views(server: Server, monkeypatch):
+def test_gridworld_logs_a_run_with_its_views(server: Server, monkeypatch, capsys):
     sys.path.insert(0, str(EXAMPLE))
     try:
         import train  # pyright: ignore[reportMissingImports]
@@ -34,6 +34,12 @@ def test_gridworld_logs_a_run_with_its_views(server: Server, monkeypatch):
     assert run["project"] == "gridworld" and run["status"] == "finished"
     assert run["step"] == 11 and run["total"] == 11
     assert {"mean_return", "success", "td_error"} <= set(run["latest"])
+    # the run says what it logs: every metric and media key it logged is described
+    declared = run["declared"]
+    assert declared["success"]["headline"] and declared["td_error"]["log"]
+    assert "within 60 steps" in declared["success"]["description"]
+    err = capsys.readouterr().err
+    assert "without a description" not in err and "never logged" not in err
     bundle = server.get(f"/api/bundles/{run['bundle']}")
     assert {f["path"] for f in bundle["files"]} >= {
         "layout.json",

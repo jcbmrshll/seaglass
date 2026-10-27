@@ -101,6 +101,40 @@ A run's **notes** say what it is testing and why. They show at the top of its pa
 where you can also write or edit them later (to record what the run turned out to
 show, say), and the run list searches them.
 
+## Describe your metrics
+
+`describe` says what a metric (or a media key) is, next to the code that logs it, so
+someone reading the run can tell without asking you:
+
+```python
+monitor.describe("mean_return", "Mean undiscounted return of the epoch's episodes: "
+                 "+1 at the goal, -0.01 a step.", better="higher", headline=True)
+monitor.describe("loss/*", "TD loss per head. Spikes just after a target sync "
+                 "are expected.", log=True, better="lower")
+monitor.describe("episode_length", unit="steps")
+monitor.describe("episode", "A greedy episode, played every 10 epochs.")
+TD = monitor.describe("td_error", f"Mean |TD error|, gamma {cfg.gamma}.", log=True)
+monitor.log(step, {TD: err, ...})   # describe returns the name: write it once
+```
+
+| argument | does |
+|---|---|
+| `description` | plain text behind an ⓘ on the metric's tile, chart and media card, on the run and project pages: what it measures, and what a good value looks like |
+| `unit` | shown after its values |
+| `log` | charts it on a log scale, unless a layout's chart says otherwise |
+| `better` | `"higher"` or `"lower"`: the project page marks the best run's value and sorts best first |
+| `headline` | one of the run's headline numbers: its tiles by default, and its columns in the run list and the project page's table |
+
+- The first argument is a name or a pattern (`*` any characters, `?` any one); a
+  name takes each field from the first description, in order, that matches it and
+  has it.
+- Call it before or after `start`. Describing a pattern again replaces what was said.
+- Descriptions belong to the run, so a run is always shown with its own, and can say
+  things about this run (`f"... over {cfg.decay} epochs"`).
+- Once a run describes anything, the client prints the metrics it logs that have no
+  description, and on finishing the descriptions that matched nothing it logged:
+  what a renamed metric leaves behind.
+
 [`examples/gridworld`](examples/gridworld) is a complete example: tabular Q-learning
 whose episodes are drawn by its own bundle.
 
@@ -118,20 +152,16 @@ bundle it shipped with, so changing the views later never changes how older runs
 look.
 
 **`layout.json`** says which module renders which media type, and lays out the run
-page (SPEC.md §8):
+page (SPEC.md §8). It only arranges: what each metric is comes from the run
+(`describe`, above).
 
 ```json
 {
   "contract": 1,
   "renderers": {"gridworld/episode": "episode.js"},
-  "summary": ["mean_return", "success"],
-  "descriptions": {
-    "*_return": "Return per episode, undiscounted: +1 at the goal, -0.01 a step.",
-    "success": "The share of the epoch's episodes that reached the goal."
-  },
   "tabs": [
     {"title": "Training", "rows": [
-      [{"type": "tiles", "metrics": ["mean_return", "success"]}],
+      [{"type": "tiles"}],
       [{"type": "media", "keys": ["episode"]},
        {"type": "chart", "title": "return", "metrics": ["*_return"], "smooth": 5}],
       [{"type": "chart", "metrics": ["*"], "split": true}],
@@ -146,7 +176,7 @@ The panel types:
 
 | type | shows |
 |---|---|
-| `tiles` | latest values |
+| `tiles` | latest values: of `metrics`, else the run's headline metrics |
 | `chart` | metrics by name or glob, with `smooth`, `log` and `split` options |
 | `media` | a card per matching key, with a step scrubber; `columns` caps the cards in a row (`1`: each the full width) |
 | `view` | a custom module |
@@ -156,12 +186,6 @@ A `split` chart draws one chart per group of metrics (`loss/policy` and `loss/va
 together, `min_X`/`mean_X`/`max_X` together); its `groups` names more, as
 `"groups": {"avg_outcome": "*_avg_outcome"}` charts every `<name>_avg_outcome`
 together, with a series per `<name>`.
-
-`descriptions` says what metrics are, by pattern, the first that matches a metric
-describing it. The run and project pages put an ⓘ by each metric described (on its
-tile, its chart, its media card) that shows the text. That's the place to explain a
-metric that isn't obvious from its name: what it measures, and what a good value
-looks like.
 
 A row's panels share its width by their `width`. A tab with a single `panel` gives a
 view the whole page. Anything beyond this vocabulary belongs in a custom view.

@@ -8,7 +8,7 @@ export const DEFAULT_TABS = [
   {
     title: "Run",
     rows: [
-      [{ type: "tiles", metrics: ["*"], max: DEFAULT_TILES }],
+      [{ type: "tiles" }],
       [{ type: "media", keys: ["*"] }],
       [{ type: "chart", metrics: ["*"], split: true }],
       [{ type: "config" }],
@@ -19,27 +19,12 @@ export const DEFAULT_TABS = [
 // The layout to draw a run with: its bundle's, or the default (§8.5) when it has none,
 // or one this frontend can't run. `note` says why the default is used, if it is.
 export function resolveLayout(layout) {
-  if (!layout) return { renderers: {}, summary: [], descriptions: [], tabs: DEFAULT_TABS, usable: false, note: null };
+  if (!layout) return { renderers: {}, tabs: DEFAULT_TABS, usable: false, note: null };
   if (layout.contract !== CONTRACT) {
-    return { renderers: {}, summary: [], descriptions: [], tabs: DEFAULT_TABS, usable: false, note: `its views target contract ${layout.contract}, and this page runs contract ${CONTRACT}` };
+    return { renderers: {}, tabs: DEFAULT_TABS, usable: false, note: `its views target contract ${layout.contract}, and this page runs contract ${CONTRACT}` };
   }
-  const summary = Array.isArray(layout.summary) ? layout.summary : [];
-  let tabs = Array.isArray(layout.tabs) && layout.tabs.length ? layout.tabs : null;
-  if (!tabs) {
-    // the default layout, its tiles showing the summary
-    tabs = DEFAULT_TABS.map((t) => ({
-      ...t,
-      rows: t.rows.map((row) => row.map((p) => (p.type === "tiles" && summary.length ? { type: "tiles" } : p))),
-    }));
-  }
-  return { renderers: layout.renderers ?? {}, summary, descriptions: descriptionList(layout.descriptions), tabs, usable: true, note: null };
-}
-
-// a layout's descriptions (§8.1) as [pattern, text] pairs, in the order listed; text
-// that isn't a string, or is blank, describes nothing
-export function descriptionList(descriptions) {
-  if (!descriptions || typeof descriptions !== "object" || Array.isArray(descriptions)) return [];
-  return Object.entries(descriptions).filter(([, t]) => typeof t === "string" && t.trim()).map(([p, t]) => [p, t.trim()]);
+  const tabs = Array.isArray(layout.tabs) && layout.tabs.length ? layout.tabs : DEFAULT_TABS;
+  return { renderers: layout.renderers ?? {}, tabs, usable: true, note: null };
 }
 
 // ---------------------------------------------------------------- patterns
@@ -134,13 +119,65 @@ export function splitGroups(names, named = null) {
   }));
 }
 
-// ---------------------------------------------------------------- descriptions
+// ---------------------------------------------------------------- declarations
 
-// what a metric or media key is, by the first description whose pattern matches it;
-// null if none does
-export function describe(list, name) {
-  for (const [p, text] of list ?? []) if (globRegex(p).test(name)) return text;
+// a run's declarations (SPEC.md §3.3) as [pattern, declaration] pairs, in the order
+// declared; a declaration that isn't an object declares nothing. Several runs' lists
+// can be joined, the one to win first.
+export function declaredList(declared) {
+  if (!declared || typeof declared !== "object" || Array.isArray(declared)) return [];
+  return Object.entries(declared).filter(([, d]) => d && typeof d === "object" && !Array.isArray(d));
+}
+
+const FIELD_TYPES = { description: "string", unit: "string", log: "boolean", better: "string", headline: "boolean" };
+
+// one field of what's declared about a metric or media key: from the first
+// declaration, in order, whose pattern matches it and that has the field; null if none
+export function declared(list, name, field) {
+  for (const [p, d] of list ?? []) {
+    const v = d[field];
+    if (typeof v !== FIELD_TYPES[field] || !globRegex(p).test(name)) continue;
+    if (field === "better" && v !== "higher" && v !== "lower") continue;
+    if (typeof v === "string" && !v.trim()) continue;
+    return typeof v === "string" ? v.trim() : v;
+  }
   return null;
+}
+
+// what a metric or media key is: its declared description, or null
+export function describe(list, name) {
+  return declared(list, name, "description");
+}
+
+// the run's headline metrics among names: in the order of the patterns that declare
+// them, then the order first logged
+export function headlines(list, names) {
+  const patterns = (list ?? []).filter(([, d]) => d.headline === true).map(([p]) => p);
+  return matchNames(patterns, names).filter((n) => declared(list, n, "headline") === true);
+}
+
+// the metrics a tiles panel shows (§8.3): its own patterns', else the headline
+// metrics, else the first few logged
+export function tileNames(panel, list, names) {
+  if (Array.isArray(panel.metrics)) return matchNames(panel.metrics, names);
+  const top = headlines(list, names);
+  return top.length ? top : names.slice(0, DEFAULT_TILES);
+}
+
+// whether a chart of these metrics has a log y axis: as its panel says, else when
+// every metric it draws is declared log
+export function chartLog(panel, list, keys) {
+  if (typeof panel?.log === "boolean") return panel.log;
+  return keys.length > 0 && keys.every((k) => declared(list, k, "log") === true);
+}
+
+// the best of a metric's values, as declared better: null when it isn't declared, or
+// there's no value to pick
+export function bestValue(list, name, values) {
+  const better = declared(list, name, "better");
+  const finite = values.filter((v) => typeof v === "number" && Number.isFinite(v));
+  if (!better || !finite.length) return null;
+  return better === "higher" ? Math.max(...finite) : Math.min(...finite);
 }
 
 // what a chart card explains of the metrics it draws, as [{names, text}]: the

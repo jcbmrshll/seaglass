@@ -97,6 +97,7 @@ A run's meta is a JSON object:
 | `activity_since` | time \| null | when `activity` last changed |
 | `tags` | string[] | |
 | `notes` | string \| null | what the run is testing and why, in the words of whoever started it (§4.8) |
+| `declared` | object | what the run says its metrics and media keys are (§3.3) |
 | `provenance` | object | where the run came from (§3.2) |
 | `bundle` | string \| null | the hash of the run's bundle |
 | `config` | object | the run's configuration, as the client sent it |
@@ -126,6 +127,51 @@ reference client sends:
 `git` is `null` outside a git checkout. A frontend can filter on any of it, e.g.
 by branch.
 
+### 3.3 Declarations
+
+A run says what the metrics and media keys it logs are in `declared`, so that a
+reader can tell without asking whoever logged them, and a frontend can show them
+well. `declared` maps a pattern (§8.3) to a declaration, in the order the patterns
+were first declared:
+
+```json
+{
+  "td_error": {"description": "Mean |TD error| of the epoch's updates.", "log": true, "better": "lower"},
+  "*_return": {"description": "Return per episode, undiscounted.", "better": "higher"},
+  "mean_return": {"headline": true},
+  "episode_length": {"unit": "steps"},
+  "episode": {"description": "A greedy episode, every 10 epochs."}
+}
+```
+
+A declaration is an object with any of these fields:
+
+| field | type | meaning |
+|---|---|---|
+| `description` | string, at most 2000 characters | what it is: what it measures, and what a good value looks like. Plain text, not markup; its line breaks are kept |
+| `unit` | string, at most 32 characters | shown after its values, e.g. `s`, `steps`, `nats` |
+| `log` | bool | chart it with a log-scale y axis |
+| `better` | `"higher"` \| `"lower"` | which way is better, where runs are compared |
+| `headline` | bool | one of the numbers that represent the run: its tiles by default (§8.3), and its columns where runs are listed or compared |
+
+Each field of a metric or media key comes from the first declaration, in order,
+whose pattern matches its name and that has the field, so a broad pattern can be
+declared after a narrow one to fill in what the narrow one leaves out. A frontend
+ignores fields it does not know, and a server stores them as they are. `unit`, `log`,
+`better` and `headline` are about metrics; a media key uses only its `description`.
+
+The **headline metrics** are the metrics logged whose `headline` is `true`, in the
+order of the patterns that declare them, then in the order first logged.
+
+A frontend SHOULD offer a description wherever it shows what it describes (a tile, a
+chart, a media card) as a control that shows it, rather than as text always on
+screen. A chart of several metrics shows the description of its title, when one
+matches it, and of each metric it draws.
+
+Declarations are part of the run: each run is drawn with its own, whatever later
+runs of the same project declare. A frontend that shows several runs together (as
+the project page of §12 does) takes each field from the newest run that declares it.
+
 ## 4. Ingest
 
 ### 4.1 Create a run: `POST /api/runs`
@@ -137,15 +183,18 @@ by branch.
   "config": {"lr": 0.0003},
   "tags": ["sweep-3"],
   "notes": "does warmup still help at this batch size?",
+  "declared": {"loss": {"description": "TD loss", "log": true, "better": "lower"}},
   "provenance": {"git": null, "host": "gpu-box", "argv": [], "cwd": "/"},
   "bundle": "9c1e…",
   "total": 300
 }
 ```
 
-Every field is optional: `project` defaults to `default`, `config` and
-`provenance` to `{}`, `tags` to `[]` and `notes` to `null`. `notes` is a string of
-at most 10000 characters. `bundle` need not have been uploaded (a run
+Every field is optional: `project` defaults to `default`, `config`, `provenance`
+and `declared` to `{}`, `tags` to `[]` and `notes` to `null`. `notes` is a string of
+at most 10000 characters. `declared` is as §3.3 describes, at most 64 KiB
+serialized; a declaration's known fields MUST have the types listed there, and other
+fields are kept as they are. `bundle` need not have been uploaded (a run
 must not fail to start because its views did); a frontend then draws the run
 without it.
 
@@ -251,7 +300,22 @@ written from a frontend, after the fact: setting them changes nothing else, not
 
 `200`, `{"ok": true}`.
 
-### 4.9 Bundles: `GET /api/bundles/{hash}`, `PUT /api/bundles/{hash}`
+### 4.9 Declarations: `POST /api/runs/{id}/declared`
+
+```json
+{"declared": {"loss": {"description": "TD loss", "unit": "nats"}, "old_name": null}}
+```
+
+Declarations made after a run started, or changed after the fact. For each pattern
+given, the server replaces the run's declaration for it whole, adding the pattern
+after the others if it is new, or with `null` removes it. The result is checked as
+on create (§4.1): `400` if a declaration is invalid or the whole would pass 64 KiB,
+and then nothing changes. Like notes, declarations are about the run rather than
+logged by it: they change nothing else, not `updated` nor `status`.
+
+`200`, `{"ok": true}`.
+
+### 4.10 Bundles: `GET /api/bundles/{hash}`, `PUT /api/bundles/{hash}`
 
 A client checks whether the server has a bundle with `GET`, which answers `404`, or
 `200` with:
@@ -485,11 +549,6 @@ goes to the new location.
 {
   "contract": 1,
   "renderers": {"gridworld/episode": "episode.js"},
-  "summary": ["return", "loss"],
-  "descriptions": {
-    "return": "Undiscounted return, averaged over the epoch's episodes.",
-    "loss/*": "TD loss per head. Spikes just after a target sync are expected."
-  },
   "tabs": [
     {"title": "Training", "rows": [
       [{"type": "tiles"}],
@@ -507,20 +566,12 @@ goes to the new location.
 |---|---|
 | `contract` | required: `1` |
 | `renderers` | media type → module path in the bundle |
-| `summary` | metric patterns: the metrics that represent the run where runs are listed together, and the default tiles |
-| `descriptions` | object, pattern → text: what the metrics and media keys it matches are |
 | `tabs` | the run page, as tabs; without it, the default layout (§8.5) |
 
 A frontend MUST ignore fields it does not know, here and in panels.
 
-**Descriptions** say what a metric is, so that a reader can tell without asking
-whoever logged it. A metric or media key is described by the first pattern (§8.3), in
-the order listed, that matches it; text that is not a string describes nothing. The
-text is plain, not markup, and its line breaks are kept. A frontend SHOULD offer a
-description wherever it shows what it describes (a tile, a chart, a media card), as a
-control that shows it rather than as text always on screen. A chart of several
-metrics shows the description of its title, when one matches it, and of each metric
-it draws.
+A layout only arranges. What a metric is (its description, unit and scale, and
+whether it is a headline metric) is declared by the run that logs it (§3.3).
 
 ### 8.2 Tabs and rows
 
@@ -540,8 +591,8 @@ Every panel has a `type` and may have a `title` and a `width`.
 
 | type | fields | shows |
 |---|---|---|
-| `tiles` | `metrics`: patterns, default `summary` | each matching metric's latest value (as of the location's step) |
-| `chart` | `metrics`: patterns (required); `split`: bool, default `false`; `groups`: object, group name → pattern or patterns, with `split` only; `smooth`: integer ≥ 0, default `0`; `log`: bool, default `false` | the matching metrics against step, as one chart, or with `split` one chart per group (§8.4), `groups` naming groups of its own; `smooth` draws a trailing moving average over that many points over the faint raw line; `log` uses a log-scale y axis |
+| `tiles` | `metrics`: patterns; without it, the run's headline metrics (§3.3), or if it has none its first 6 metrics | each metric's latest value (as of the location's step), with its unit |
+| `chart` | `metrics`: patterns (required); `split`: bool, default `false`; `groups`: object, group name → pattern or patterns, with `split` only; `smooth`: integer ≥ 0, default `0`; `log`: bool | the matching metrics against step, as one chart, or with `split` one chart per group (§8.4), `groups` naming groups of its own; `smooth` draws a trailing moving average over that many points over the faint raw line; `log` uses a log-scale y axis, and without it a chart has one when every metric it draws is declared `log` (§3.3) |
 | `media` | `keys`: patterns (required); `columns`: integer ≥ 1 | for each matching key, one card with that key's entries, drawn by the renderer for each entry's type, and a scrubber over the entries' steps; `columns` puts at most that many cards in a row (default: the frontend's choice), so `1` gives each card the panel's full width, and a frontend MAY still put fewer in a row on a narrow screen |
 | `view` | `module`: path in the bundle (required); `props`: object | a custom module (§7), given `props` as `data` |
 | `config` | | the run's config, as tables |
@@ -587,16 +638,15 @@ contract, is drawn as if its layout were:
 
 ```json
 {"contract": 1, "tabs": [{"title": "Run", "rows": [
-  [{"type": "tiles", "metrics": ["*"]}],
+  [{"type": "tiles"}],
   [{"type": "media", "keys": ["*"]}],
   [{"type": "chart", "metrics": ["*"], "split": true}],
   [{"type": "config"}]
 ]}]}
 ```
 
-except that the tiles show at most the first 6 metrics. A bundle with no `tabs` has
-this layout too, with its own `renderers` and `summary` (the tiles then show the
-summary).
+so its tiles show the run's headline metrics, or its first 6. A bundle with no
+`tabs` has this layout too, with its own `renderers`.
 
 ## 9. Conformance
 
@@ -690,7 +740,13 @@ SHOULD do the same.
 - Notes are those passed, else `SEAGLASS_NOTES`, so whoever launches a run can say
   what it is for without editing the script.
 - At start it records provenance (§3.2), hashes its bundle directory, uploads the
-  bundle if the server lacks it (§4.9), and creates the run (§4.1).
+  bundle if the server lacks it (§4.10), and creates the run (§4.1) with what the
+  script declared so far (§3.3). It sends declarations made later as they come
+  (§4.9).
+- Once a run has declared anything, the client says which metrics and media keys it
+  logs that no declaration matches, each once, and on finishing which declared
+  patterns matched nothing it logged (counting a split chart's group names, §8.4),
+  so a name changed in one place and not the other is noticed.
 - Logging never raises and never blocks training: values are queued and sent in
   order by a background thread. If the server cannot be reached, the client says so
   once and drops what it cannot send; when the server comes back, it says so and
@@ -705,13 +761,15 @@ The basic frontend that ships with the reference server polls: the run list ever
 (§2), while its page is visible. It has:
 
 - a **run list**, filterable by project, tag and branch, and searchable by name, id
-  and notes, with each run's status, progress, activity and summary metrics;
+  and notes, with each run's status, progress, activity and headline metrics;
 - a **project list**, `/projects`: each project, with how many runs it has, how
   many are running, when it was last active and its newest run;
 - a **project page**, `/project/<project>`, that compares the project's runs: the
   runs down the side, each turned on or off, beside a chart per metric with a line
   per run turned on. The side expands into a table of the config keys whose values
-  differ between the runs and their latest summary metrics, sortable by any column.
+  differ between the runs and their latest headline metrics (or every metric, when
+  none is a headline), sortable by any column. A metric declared `better` is sorted
+  best first, its best value marked; the charts come headline metrics first.
   Its address holds the runs turned on, the sort, a filter, whether the table is
   expanded, and the charts' metric patterns, smoothing and scale. It reads only what
   §5 offers: the run list, each run's meta (for its config) and the metrics of the

@@ -48,6 +48,29 @@
     ]
   },
   {
+    "name": "declarations are merged by pattern, changing nothing else",
+    "steps": [
+      {"request": {"method": "POST", "path": "/api/runs", "json": {"project": "conformance", "declared": {"loss": {"description": "first"}, "acc": {"headline": true}}}},
+       "response": {"status": 201, "json": {"id": {"$capture": "run"}}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/finish", "json": {}},
+       "response": {"status": 200}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}"},
+       "response": {"status": 200, "json": {"updated": {"$capture": "updated"}}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/declared", "json": {"declared": {"loss": {"unit": "nats"}, "eps*": {"description": "exploration {{nonce}}", "log": false}, "acc": null}}},
+       "response": {"status": 200, "json": {"ok": true}}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}"},
+       "response": {"status": 200, "json": {"declared": {"$exact": {"loss": {"unit": "nats"}, "eps*": {"description": "exploration {{nonce}}", "log": false}}}, "status": "finished", "updated": {"$var": "updated"}}}},
+      {"request": {"method": "GET", "path": "/api/runs"},
+       "response": {"status": 200, "json": {"$contains": [{"id": {"$var": "run"}, "declared": {"eps*": {"description": "exploration {{nonce}}"}}}]}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/declared", "json": {"declared": {"loss": {"headline": "yes"}}}},
+       "response": {"status": 400, "json": {"error": {"$type": "string"}}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/declared", "json": {}},
+       "response": {"status": 400}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}"},
+       "response": {"status": 200, "json": {"declared": {"$exact": {"loss": {"unit": "nats"}, "eps*": {"description": "exploration {{nonce}}", "log": false}}}}}}
+    ]
+  },
+  {
     "name": "finishing sets the status and clears the activity",
     "steps": [
       {"request": {"method": "POST", "path": "/api/runs", "json": {"project": "conformance"}},

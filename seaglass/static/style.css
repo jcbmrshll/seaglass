@@ -228,6 +228,8 @@ table.runs.compare th.group { text-align: left; border-left: 1px solid var(--edg
 table.runs.compare .first { border-left: 1px solid var(--edge-soft); }
 table.runs.compare td { vertical-align: middle; }
 table.runs.compare tr.run:not(.on) td, table.runs.compare tr.run:not(.on) .name { color: var(--sg-dim); }
+table.runs.compare tr.run td.best { color: var(--sg-good); font-weight: 600; }
+table.runs .unit { color: var(--sg-faint); font-weight: 400; }
 table.runs.compare td.pick, table.runs.compare th.pick { width: 1px; padding: 4px 0 4px 6px; }
 table.runs.compare.compact .who { max-width: 0; width: 100%; padding-left: 6px; }
 .who .line1 { display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; }
@@ -293,6 +295,7 @@ button.eye[aria-pressed="false"] { color: var(--sg-faint); }
 .tile .lab { display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--sg-dim); }
 .tile .lab span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tile .val { font: 600 17px var(--sg-mono); color: var(--sg-fg-strong); margin-top: 1px; }
+.tile .val .unit { font-size: 12px; font-weight: 400; color: var(--sg-dim); }
 
 /* cards */
 

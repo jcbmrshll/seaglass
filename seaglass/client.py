@@ -1,6 +1,7 @@
 """Send a training run's metrics and data to a seaglass server.
 
     monitor = Monitor(project="gridworld", views="views/")
+    monitor.describe("loss", "TD loss of the epoch's updates", log=True, better="lower")
     monitor.start(config={"lr": 3e-4}, total=300)
     monitor.activity("collecting episodes")
     monitor.log(step, {"loss": 0.41, "episode": Arrays("gridworld/episode", grid=g)})
@@ -13,6 +14,12 @@ What `log` takes, by value:
     Data(value, type=...) or a dict          JSON, as a .json file and a media entry
     File(data, suffix, type=...)             any bytes, as a file and a media entry
     Row(**fields)                            a row of the stream named by its key
+
+`describe` says what metrics and media keys are, so whoever reads the run can tell
+without asking: a description behind an ⓘ, a unit, a log scale, which way is better,
+and which metrics are the run's headline numbers. Once a run describes anything, the
+client says which of what it logs has no description, and at finish which
+descriptions matched nothing it logged.
 
 Runs only send data: drawing it is the frontend's job, with the renderers of the
 project's bundle (`views`). Everything but `start` happens on a background thread,
@@ -38,6 +45,7 @@ import sys
 import threading
 import urllib.error
 import urllib.request
+from functools import cache
 from numbers import Number
 from pathlib import Path
 from typing import Any, Self
@@ -46,7 +54,7 @@ from urllib.parse import quote
 import numpy as np
 
 from seaglass.bundle import bundle_hash, problems, read_bundle
-from seaglass.store import MAX_NOTES
+from seaglass.store import MAX_DESCRIPTION, MAX_NOTES, MAX_UNIT
 
 DEFAULT_URL = "http://localhost:8008"
 HEARTBEAT_S = 30.0
@@ -181,6 +189,17 @@ def _safe(key: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", key).lstrip(".")[:100] or "media"
 
 
+@cache
+def _glob(pattern: str) -> re.Pattern[str]:
+    """A pattern (SPEC.md §8.3) as a regex: * any run of characters, ? any one."""
+    parts = (".*" if c == "*" else "." if c == "?" else re.escape(c) for c in pattern)
+    return re.compile("".join(parts), re.DOTALL)
+
+
+def matches(pattern: str, name: str) -> bool:
+    return _glob(pattern).fullmatch(name) is not None
+
+
 def _git(*args: str) -> str | None:
     try:
         out = subprocess.run(
@@ -256,6 +275,11 @@ class Monitor:
         self._failing = False
         self._rejected: set[str] = set()
         self._dropped: set[str] = set()
+        # pattern -> declaration, as the server has them (SPEC.md §3.3)
+        self._declared: dict[str, dict[str, Any]] = {}
+        # metric names and media keys logged, for saying which aren't described
+        self._logged: set[str] = set()
+        self._undescribed: set[str] = set()
         # (kind, payload) for the sender thread, in order
         self._queue: queue.Queue[tuple[str, Any]] = queue.Queue()
         self._sender: threading.Thread | None = None
@@ -323,6 +347,7 @@ class Monitor:
                 "config": config or {},
                 "tags": self.tags,
                 "notes": self.notes,
+                "declared": self._declared,
                 "provenance": provenance(),
                 "bundle": self.bundle_hash,
                 "total": total,
@@ -377,14 +402,19 @@ class Monitor:
         metrics: list[dict[str, Any]] = []
         media: list[dict[str, Any]] = []
         streams: dict[str, list[dict[str, Any]]] = {}
+        declared: dict[str, Any] = {}
+        names: set[str] = set()
 
         def flush() -> None:
+            if declared:
+                self._post(f"{run}/declared", {"declared": declared})
             if metrics:
                 self._post(f"{run}/metrics", metrics)
             if media:
                 self._post(f"{run}/media", media)
             for name, rows in streams.items():
                 self._post(f"{run}/streams/{quote(name)}", rows)
+            declared.clear()
             metrics.clear()
             media.clear()
             streams.clear()
@@ -393,7 +423,10 @@ class Monitor:
             try:
                 if kind == "log":
                     step, data = payload
-                    self._encode(step, data, metrics, media, streams)
+                    self._encode(step, data, metrics, media, streams, names)
+                    continue
+                if kind == "declared":
+                    declared.update(payload)
                     continue
                 # what comes after a log may depend on it being there (finish)
                 flush()
@@ -404,6 +437,24 @@ class Monitor:
             except Exception as e:  # noqa: BLE001 - logging must never stop training
                 _log(f"dropped a log ({type(e).__name__}: {e})")
         flush()
+        self._logged |= names
+        self._say_undescribed(names)
+
+    def _say_undescribed(self, names: set[str]) -> None:
+        """Once the run describes anything, say which of the names it logs no
+        description matches, each name once: all of them at first, then new ones as
+        they come."""
+        if not self._declared:
+            return
+        patterns = list(self._declared)
+        missing = sorted(
+            n
+            for n in names - self._undescribed
+            if not any(matches(p, n) for p in patterns)
+        )
+        if missing:
+            self._undescribed.update(missing)
+            _log(f"logged without a description: {', '.join(missing)}")
 
     def _encode(
         self,
@@ -412,13 +463,17 @@ class Monitor:
         metrics: list[dict[str, Any]],
         media: list[dict[str, Any]],
         streams: dict[str, list[dict[str, Any]]],
+        names: set[str],
     ) -> None:
+        """Add one log's values to the batch, and the metric names and media keys it
+        logged to `names`."""
         row: dict[str, Any] = {}
         for key, value in data.items():
             try:
                 number = to_number(value)
                 if number is not None:
                     row[key] = number if math.isfinite(number) else None
+                    names.add(key)
                 elif isinstance(value, Row):
                     fields = _plain(value.fields)
                     streams.setdefault(key, []).append({**fields, "step": step})
@@ -430,6 +485,7 @@ class Monitor:
                             self._dropped.add(key)
                             _log(f"can't log {key}, a {type(value).__name__}; dropped")
                         continue
+                    names.add(key)
                     entry = self._upload(key, step, value)
                     if entry:
                         media.append(entry)
@@ -487,6 +543,59 @@ class Monitor:
         if self.run_id is not None:
             self._enqueue("activity", text)
 
+    def describe(
+        self,
+        pattern: str,
+        description: str | None = None,
+        *,
+        unit: str | None = None,
+        log: bool | None = None,
+        better: str | None = None,
+        headline: bool | None = None,
+    ) -> str:
+        """Say what the metrics and media keys that `pattern` matches are, before or
+        after start; describing a pattern again replaces what was said. Returns the
+        pattern, so a name can be written once: `TD = monitor.describe("td_error",
+        ...)`, then `log(step, {TD: err})`.
+
+        Args:
+            pattern: a metric name or media key, or a pattern (* any run of
+                characters, ? any one); a name takes the first description that
+                matches it, in the order described
+            description: what it measures and what a good value looks like, as plain
+                text, shown behind an ⓘ
+            unit: shown after values, e.g. "s" or "nats"
+            log: chart it on a log scale (a layout's chart can still say otherwise)
+            better: "higher" or "lower", so runs compared can show the best
+            headline: one of the numbers that represent the run: its tiles by
+                default, and its columns where runs are listed or compared
+        """
+        decl: dict[str, Any] = {}
+        if description is not None:
+            decl["description"] = str(description)[:MAX_DESCRIPTION]
+            if len(str(description)) > MAX_DESCRIPTION:
+                _log(f"{pattern}'s description cut to {MAX_DESCRIPTION} characters")
+        if unit is not None:
+            decl["unit"] = str(unit)[:MAX_UNIT]
+        if log is not None:
+            decl["log"] = bool(log)
+        if better is not None:
+            if better in ("higher", "lower"):
+                decl["better"] = better
+            else:
+                _log(f"{pattern}: better is 'higher' or 'lower', not {better!r}")
+        if headline is not None:
+            decl["headline"] = bool(headline)
+        if not (isinstance(pattern, str) and 0 < len(pattern) <= 200):
+            _log(f"can't describe {pattern!r}: a pattern is 1-200 characters")
+            return pattern
+        if self._declared.get(pattern) == decl:
+            return pattern
+        self._declared[pattern] = decl
+        if self.run_id is not None:
+            self._enqueue("declared", {pattern: decl})
+        return pattern
+
     def log(self, step: int, data: dict[str, Any]) -> None:
         """Queue values for one step (see the module's docstring); they're sent in the
         background. Values of other kinds are dropped, with a word the first time."""
@@ -518,6 +627,22 @@ class Monitor:
         self._finished = True
         self._enqueue("finish", status)
         self.flush()
+        if status == "finished":
+            self._say_unused()
+
+    def _say_unused(self) -> None:
+        """Say which descriptions matched nothing the run logged: most likely a name
+        that changed in one place and not the other. A split chart's group (SPEC.md
+        §8.4) counts as logged, as its card shows its name's description."""
+        names = set(self._logged)
+        for n in self._logged:
+            if "/" in n[1:]:
+                names.add(n[: n.rindex("/")])
+            if stat := re.fullmatch(r"(?:min|mean|max)_(.+)", n, re.DOTALL):
+                names.add(stat[1])
+        unused = [p for p in self._declared if not any(matches(p, n) for n in names)]
+        if unused:
+            _log(f"described but never logged: {', '.join(unused)}")
 
     def _at_exit(self) -> None:
         # a script that ends without finish(): send what it logged, but don't hang

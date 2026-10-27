@@ -34,6 +34,9 @@ TYPE = re.compile(r"[a-z0-9][a-z0-9_.-]*(/[a-z0-9][a-z0-9_.-]*)+")
 STATUS = re.compile(r"[a-z][a-z0-9_-]{0,31}")
 MAX_ACTIVITY = 500
 MAX_NOTES = 10000
+MAX_DECLARED = 64 * 1024
+MAX_DESCRIPTION = 2000
+MAX_UNIT = 32
 MAX_ATTRS = 64 * 1024
 MAX_TAGS = 32
 
@@ -163,6 +166,51 @@ def check_notes(notes: Any) -> str | None:
     return notes
 
 
+def _check_declaration(pattern: Any, decl: Any) -> None:
+    _check(
+        isinstance(pattern, str) and 0 < len(pattern) <= 200,
+        "a declared pattern is a string of 1-200 characters",
+    )
+    _check(isinstance(decl, dict), f"{pattern}'s declaration is a JSON object")
+    # fields this server doesn't know are kept as they are, for newer frontends
+    description, unit = decl.get("description"), decl.get("unit")
+    _check(
+        description is None
+        or (isinstance(description, str) and len(description) <= MAX_DESCRIPTION),
+        f"{pattern}'s description is a string of at most {MAX_DESCRIPTION} characters",
+    )
+    _check(
+        unit is None or (isinstance(unit, str) and len(unit) <= MAX_UNIT),
+        f"{pattern}'s unit is a string of at most {MAX_UNIT} characters",
+    )
+    for flag in ("log", "headline"):
+        _check(
+            decl.get(flag) is None or isinstance(decl[flag], bool),
+            f"{pattern}'s {flag} is true or false",
+        )
+    _check(
+        decl.get("better") in (None, "higher", "lower"),
+        f"{pattern}'s better is higher or lower",
+    )
+
+
+def check_declared(declared: Any, removals: bool = False) -> dict[str, Any]:
+    """A run's declarations (SPEC.md §3.3): pattern -> declaration, or with
+    `removals` also pattern -> null."""
+    _check(isinstance(declared, dict), "declared is a JSON object")
+    for pattern, decl in declared.items():
+        if not (removals and decl is None):
+            _check_declaration(pattern, decl)
+    return declared
+
+
+def _check_declared_size(declared: dict[str, Any]) -> None:
+    _check(
+        len(json.dumps(declared)) <= MAX_DECLARED,
+        "a run's declarations are at most 64 KiB",
+    )
+
+
 class RunStore:
     def __init__(self, root: str | Path, max_file: int = 1 << 30):
         self.root = Path(root)
@@ -181,8 +229,9 @@ class RunStore:
 
     def _read_meta(self, run_dir: Path) -> dict[str, Any]:
         meta = json.loads((run_dir / "meta.json").read_text())
-        # runs stored before notes existed have none
+        # runs stored before notes and declarations existed have none
         meta.setdefault("notes", None)
+        meta.setdefault("declared", {})
         return meta
 
     def _write_meta(self, run_dir: Path, meta: dict[str, Any]) -> None:
@@ -227,6 +276,8 @@ class RunStore:
         _check(isinstance(provenance, dict), "provenance is a JSON object")
         tags = check_tags(_given(body, "tags", []))
         notes = check_notes(body.get("notes"))
+        declared = check_declared(_given(body, "declared", {}))
+        _check_declared_size(declared)
         bundle = body.get("bundle")
         _check(
             bundle is None
@@ -258,6 +309,7 @@ class RunStore:
                 "activity_since": None,
                 "tags": tags,
                 "notes": notes,
+                "declared": declared,
                 "provenance": provenance,
                 "bundle": bundle,
                 "config": config,
@@ -397,6 +449,25 @@ class RunStore:
         with self.lock:
             meta = self._read_meta(run_dir)
             meta["notes"] = notes
+            self._write_meta(run_dir, meta)
+
+    def declare(self, run_id: str, body: Any) -> None:
+        """Merge declarations into the run's: each pattern given replaces its
+        declaration whole (a new one goes last), and null removes it."""
+        run_dir = self._dir(run_id)
+        _check(isinstance(body, dict) and "declared" in body, "{declared} is needed")
+        changes = check_declared(body["declared"], removals=True)
+        # like notes, declarations leave the run's updated and status as they were
+        with self.lock:
+            meta = self._read_meta(run_dir)
+            declared = dict(meta["declared"])
+            for pattern, decl in changes.items():
+                if decl is None:
+                    declared.pop(pattern, None)
+                else:
+                    declared[pattern] = decl
+            _check_declared_size(declared)
+            meta["declared"] = declared
             self._write_meta(run_dir, meta)
 
     def finish(self, run_id: str, body: Any) -> None:

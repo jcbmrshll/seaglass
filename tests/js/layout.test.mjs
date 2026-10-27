@@ -1,8 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  applyNavigate, chartNotes, describe, descriptionList, entriesByKey, entryIndexAt, globCapture, globRegex, locationQuery, logTicks, matchNames,
-  mediaColumns, metricNames, niceTicks, parseLocation, resolveLayout, seriesPoints, smooth, splitGroups, valueAt,
+  applyNavigate, bestValue, chartLog, chartNotes, declared, declaredList, describe, entriesByKey, entryIndexAt, globCapture, globRegex, headlines,
+  locationQuery, logTicks, matchNames, mediaColumns, metricNames, niceTicks, parseLocation, resolveLayout, seriesPoints, smooth, splitGroups,
+  tileNames, valueAt,
 } from "../../seaglass/static/layout.js";
 
 test("patterns", () => {
@@ -125,10 +126,10 @@ test("layouts", () => {
   const future = resolveLayout({ contract: 2, tabs: [{ title: "x", rows: [] }] });
   assert.equal(future.usable, false);
   assert.match(future.note, /contract 2/);
-  const noTabs = resolveLayout({ contract: 1, renderers: { "a/b": "r.js" }, summary: ["loss"] });
+  const noTabs = resolveLayout({ contract: 1, renderers: { "a/b": "r.js" } });
   assert.equal(noTabs.usable, true);
   assert.deepEqual(noTabs.renderers, { "a/b": "r.js" });
-  // the default layout, its tiles showing the summary
+  // the default layout, its tiles the run's headline metrics
   assert.deepEqual(noTabs.tabs[0].rows[0], [{ type: "tiles" }]);
   const own = resolveLayout({ contract: 1, tabs: [{ title: "T", panel: { type: "view", module: "v.js" } }] });
   assert.equal(own.tabs[0].panel.module, "v.js");
@@ -143,25 +144,73 @@ test("media columns", () => {
   assert.equal(mediaColumns(undefined), null);
 });
 
-test("descriptions", () => {
-  const list = descriptionList({ "loss/*": "per-head loss", loss: "the total", "*_return": "a return", lr: 3, blank: " ", "*": "anything" });
-  // in the order listed; text that isn't a string, or is blank, is dropped
-  assert.deepEqual(list.map(([p]) => p), ["loss/*", "loss", "*_return", "*"]);
-  for (const bad of [null, "x", ["a"], 3]) assert.deepEqual(descriptionList(bad), []);
-  // the first pattern that matches
+test("declarations", () => {
+  const list = declaredList({
+    "loss/*": { description: "per-head loss", log: true },
+    loss: { description: "the total", unit: "nats", better: "lower", headline: true },
+    "*_return": { description: "a return", better: "higher", headline: true },
+    lr: 3,
+    blank: { description: " ", unit: 4, better: "up" },
+    "*": { description: "anything", log: false },
+  });
+  // in the order declared; a declaration that isn't an object declares nothing
+  assert.deepEqual(list.map(([p]) => p), ["loss/*", "loss", "*_return", "blank", "*"]);
+  for (const bad of [null, "x", ["a"], 3]) assert.deepEqual(declaredList(bad), []);
+  // each field from the first declaration that matches and has it
   assert.equal(describe(list, "loss/policy"), "per-head loss");
   assert.equal(describe(list, "loss"), "the total");
   assert.equal(describe(list, "lr"), "anything");
+  assert.equal(declared(list, "loss/policy", "log"), true);
+  assert.equal(declared(list, "loss", "log"), false);
+  assert.equal(declared(list, "loss/policy", "unit"), null);
+  // a field of the wrong type, or blank, or a better that's neither, isn't there
+  assert.equal(describe(list, "blank"), "anything");
+  assert.equal(declared(list, "blank", "unit"), null);
+  assert.equal(declared(list, "blank", "better"), null);
   assert.equal(describe([], "loss"), null);
-  assert.equal(describe(descriptionList({ "loss/*": "x" }), "loss"), null);
-  // the layouts carry them, the default none
-  assert.deepEqual(resolveLayout({ contract: 1, descriptions: { a: "b" } }).descriptions, [["a", "b"]]);
-  assert.deepEqual(resolveLayout(null).descriptions, []);
-  assert.deepEqual(resolveLayout({ contract: 2, descriptions: { a: "b" } }).descriptions, []);
+  assert.equal(describe(declaredList({ "loss/*": { description: "x" } }), "loss"), null);
+  // lists join, the first to win: a project's runs, newest first
+  const newer = declaredList({ loss: { description: "renamed" } });
+  assert.equal(describe([...newer, ...list], "loss"), "renamed");
+  assert.equal(declared([...newer, ...list], "loss", "unit"), "nats");
+});
+
+test("headlines and tiles", () => {
+  const list = declaredList({ min_return: { headline: false }, "*_return": { headline: true }, loss: { headline: true }, lr: {} });
+  const names = ["lr", "loss", "max_return", "min_return", "mean_return"];
+  // in the order declared, then logged; one declared not a headline first isn't
+  assert.deepEqual(headlines(list, names), ["max_return", "mean_return", "loss"]);
+  // a later declaration doesn't undo an earlier one
+  assert.deepEqual(headlines(declaredList({ "*_return": { headline: true }, min_return: { headline: false } }), names), ["max_return", "min_return", "mean_return"]);
+  assert.deepEqual(headlines([], names), []);
+  // tiles: the panel's own, else the headlines, else the first six logged
+  assert.deepEqual(tileNames({ type: "tiles", metrics: ["lr"] }, list, names), ["lr"]);
+  assert.deepEqual(tileNames({ type: "tiles" }, list, names), ["max_return", "mean_return", "loss"]);
+  const many = ["a", "b", "c", "d", "e", "f", "g"];
+  assert.deepEqual(tileNames({ type: "tiles" }, [], many), many.slice(0, 6));
+});
+
+test("log axes", () => {
+  const list = declaredList({ "loss/*": { log: true }, lr: { log: true } });
+  // as the panel says, else when everything charted is declared log
+  assert.equal(chartLog({}, list, ["loss/a", "loss/b"]), true);
+  assert.equal(chartLog({}, list, ["loss/a", "acc"]), false);
+  assert.equal(chartLog({ log: false }, list, ["lr"]), false);
+  assert.equal(chartLog({ log: true }, [], ["acc"]), true);
+  assert.equal(chartLog(null, list, []), false);
+});
+
+test("the best value", () => {
+  const list = declaredList({ loss: { better: "lower" }, "*_return": { better: "higher" } });
+  assert.equal(bestValue(list, "loss", [0.3, null, 0.1, undefined, 0.2]), 0.1);
+  assert.equal(bestValue(list, "mean_return", [1, 3, 2]), 3);
+  assert.equal(bestValue(list, "acc", [1, 3, 2]), null);
+  assert.equal(bestValue(list, "loss", [null]), null);
 });
 
 test("a chart's notes", () => {
-  const list = descriptionList({ loss: "the TD loss, by head", "loss/policy": "the policy head's", "*_return": "return per episode", lr: "the learning rate" });
+  const texts = { loss: "the TD loss, by head", "loss/policy": "the policy head's", "*_return": "return per episode", lr: "the learning rate" };
+  const list = declaredList(Object.fromEntries(Object.entries(texts).map(([p, description]) => [p, { description }])));
   const one = (key) => ({ name: key, series: [{ name: key, key }] });
   // one metric: its description, about the whole card
   assert.deepEqual(chartNotes(list, one("lr")), [{ names: [], text: "the learning rate" }]);

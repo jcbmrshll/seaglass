@@ -1,7 +1,7 @@
 // Line charts of metrics against step, drawn as SVG, and the page's tooltip.
 
 import { h } from "./dom.js";
-import { fmt, fmtTick } from "./format.js";
+import { fmt, fmtTick, withUnit } from "./format.js";
 import { logTicks, niceTicks } from "./layout.js";
 
 export const SERIES = [1, 2, 3, 4, 5, 6].map((i) => `var(--sg-s${i})`);
@@ -29,7 +29,7 @@ export function swatchStyle({ color, dashed = false }) {
   return dashed ? `background:repeating-linear-gradient(90deg,${color} 0 5px,transparent 5px 8px)` : `background:${color}`;
 }
 
-// A chart of series [{name, color, points: [[step, value]], raw?: points, dashed?, id?}]
+// A chart of series [{name, color, points: [[step, value]], raw?: points, dashed?, id?, unit?}]
 // `width` wide. `raw` (the unsmoothed points) is drawn faint under the line, and a
 // series' paths carry its `id` as data-id, so a page can pick them out. A dashed mark
 // shows `mark` (the step picked), and a click picks the nearest step with onPick(step).
@@ -130,7 +130,7 @@ export function lineChart(series, width, { log = false, mark = null, onPick = nu
       e.clientY,
       h("div", { class: "head", text: `step ${best}${onPick ? " · click to pick" : ""}` }),
       ...rows.map(([v, s]) =>
-        h("div", { class: "row" }, h("i", { style: swatchStyle(s) }), h("b", { text: fmt(v) }), series.length > 1 && h("span", { text: s.name })),
+        h("div", { class: "row" }, h("i", { style: swatchStyle(s) }), h("b", { text: withUnit(fmt(v), s.unit) }), series.length > 1 && h("span", { text: s.name })),
       ),
     );
   });
