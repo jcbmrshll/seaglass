@@ -22,9 +22,17 @@ export function hideTip() {
   if (tip) tip.hidden = true;
 }
 
-// A chart of series [{name, color, points: [[step, value]], raw?: points}] `width` wide.
-// `raw` (the unsmoothed points) is drawn faint under the line. A dashed mark shows
-// `mark` (the step picked), and a click picks the nearest step with onPick(step).
+const DASH = "5 3";
+
+// the short line that stands for a series in a legend or the tooltip
+export function swatchStyle({ color, dashed = false }) {
+  return dashed ? `background:repeating-linear-gradient(90deg,${color} 0 5px,transparent 5px 8px)` : `background:${color}`;
+}
+
+// A chart of series [{name, color, points: [[step, value]], raw?: points, dashed?, id?}]
+// `width` wide. `raw` (the unsmoothed points) is drawn faint under the line, and a
+// series' paths carry its `id` as data-id, so a page can pick them out. A dashed mark
+// shows `mark` (the step picked), and a click picks the nearest step with onPick(step).
 // Returns {el, setMark(step)}.
 export function lineChart(series, width, { log = false, mark = null, onPick = null } = {}) {
   const W = Math.max(width, 200);
@@ -69,8 +77,9 @@ export function lineChart(series, width, { log = false, mark = null, onPick = nu
     return d;
   };
   for (const s of series) {
-    if (s.raw) svg.append(h("path", { class: "line raw", d: path(s.raw), stroke: s.color }));
-    svg.append(h("path", { class: "line", d: path(s.points), stroke: s.color }));
+    const attrs = { stroke: s.color, "stroke-dasharray": s.dashed ? DASH : null, "data-id": s.id };
+    if (s.raw) svg.append(h("path", { class: "line raw", d: path(s.raw), ...attrs }));
+    svg.append(h("path", { class: "line", d: path(s.points), ...attrs }));
   }
 
   const markLine = h("line", { class: "step-mark", y1: pad.t, y2: H - pad.b, visibility: "hidden" });
@@ -121,7 +130,7 @@ export function lineChart(series, width, { log = false, mark = null, onPick = nu
       e.clientY,
       h("div", { class: "head", text: `step ${best}${onPick ? " · click to pick" : ""}` }),
       ...rows.map(([v, s]) =>
-        h("div", { class: "row" }, h("i", { style: `background:${s.color}` }), h("b", { text: fmt(v) }), series.length > 1 && h("span", { text: s.name })),
+        h("div", { class: "row" }, h("i", { style: swatchStyle(s) }), h("b", { text: fmt(v) }), series.length > 1 && h("span", { text: s.name })),
       ),
     );
   });

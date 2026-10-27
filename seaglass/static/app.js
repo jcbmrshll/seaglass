@@ -9,7 +9,10 @@ import {
   CONTRACT, applyNavigate, entriesByKey, entryIndexAt, locationQuery, matchNames, metricNames,
   parseLocation, resolveLayout, seriesPoints, smooth, splitGroups, valueAt,
 } from "./layout.js";
-import { SERIES, hideTip, lineChart } from "./chart.js";
+import { SERIES, hideTip, lineChart, swatchStyle } from "./chart.js";
+import {
+  DEFAULT_SHOWN, SLOTS, assignSlots, configColumns, configText, flattenConfig, parseSort, runMatches, sortBy,
+} from "./compare.js";
 import { currentTheme, mountModule } from "./host.js";
 import { genericView } from "./generic.js";
 import { readNpz } from "./npz.js";
@@ -20,6 +23,8 @@ const RUNS_POLL_MS = 5000;
 // the windows offered over the charts, in steps
 const CHART_WINDOWS = [50, 200, 1000];
 const FILE_CACHE = 64;
+// run metas read at once, for their configs
+const CONFIG_BATCH = 8;
 
 const main = document.getElementById("main");
 
@@ -59,7 +64,11 @@ let page = null;
 
 function route() {
   const m = location.pathname.match(/^\/run\/([\w-]+)\/?$/);
-  return m ? { name: "run", id: m[1] } : { name: "list" };
+  if (m) return { name: "run", id: m[1] };
+  const p = location.pathname.match(/^\/project\/([^/]+)\/?$/);
+  if (p) return { name: "project", project: decodeURIComponent(p[1]) };
+  if (/^\/projects\/?$/.test(location.pathname)) return { name: "projects" };
+  return { name: "list" };
 }
 
 export function go(path) {
@@ -75,7 +84,11 @@ function show() {
   }
   page?.destroy();
   hideTip();
-  page = r.name === "run" ? new RunPage(r.id) : new RunList();
+  const make = { run: () => new RunPage(r.id), project: () => new ProjectPage(r.project), projects: () => new ProjectList(), list: () => new RunList() };
+  page = make[r.name]();
+  // the header's link to the kind of page shown
+  const section = r.name === "project" || r.name === "projects" ? "projects" : "runs";
+  for (const a of document.querySelectorAll("#hdr [data-nav]")) a.classList.toggle("on", a.dataset.nav === section);
 }
 
 addEventListener("popstate", show);
@@ -178,7 +191,7 @@ class RunList {
         h("td", {},
           h("a", { class: "name", href: `/run/${r.id}`, "data-app": true, text: r.name }),
           h("div", { class: "sub", text: activity(r, now) || r.id })),
-        h("td", { class: "mono", text: r.project }),
+        h("td", { class: "mono" }, h("a", { href: `/project/${encodeURIComponent(r.project)}`, "data-app": true, text: r.project, title: "compare the project's runs" })),
         h("td", {}, (r.tags ?? []).map((t) => h("span", { class: "chip", text: t }))),
         h("td", { class: "mono" }, git ? [git.branch ?? "", git.dirty ? h("span", { class: "chip dirty", text: "dirty", title: "uncommitted changes" }) : null] : "–"),
         h("td", { class: "mono", text: started(r.created) }),
@@ -196,7 +209,8 @@ class RunList {
         select("tag", "tag", tags),
         select("branch", "branch", branches),
         search,
-        h("span", { class: "count", text: `${shown.length} of ${runs.length}` })),
+        h("span", { class: "count", text: `${shown.length} of ${runs.length}` }),
+        f.project && h("a", { href: `/project/${encodeURIComponent(f.project)}`, "data-app": true, text: "compare runs →" })),
       runs.length
         ? h("table", { class: "runs" }, head, rows)
         : h("div", { class: "empty" },
@@ -206,6 +220,475 @@ class RunList {
             h("p", { text: "It shows up here as soon as it starts." })),
     );
   }
+}
+
+// ---------------------------------------------------------------- project list
+
+// every project on the server, most recently active first, each opening its page
+class ProjectList {
+  constructor() {
+    document.title = "projects · seaglass";
+    main.className = "";
+    this.el = h("div", { class: "page" });
+    main.replaceChildren(this.el);
+    main.scrollTop = 0;
+    this.poll();
+    this.timer = setInterval(() => document.visibilityState === "visible" && this.poll(), RUNS_POLL_MS);
+  }
+
+  destroy() {
+    clearInterval(this.timer);
+    this.dead = true;
+  }
+
+  async poll() {
+    let runs;
+    try {
+      runs = await api("/api/runs");
+      setConnected(true);
+    } catch {
+      setConnected(false);
+      if (this.runs != null) return;
+      runs = [];
+    }
+    if (this.dead) return;
+    this.runs = runs;
+    this.render();
+  }
+
+  render() {
+    const now = Date.now() / 1000;
+    // runs come newest first, so a project's first run is its newest
+    const projects = new Map();
+    for (const r of this.runs) {
+      let p = projects.get(r.project);
+      if (!p) projects.set(r.project, (p = { name: r.project, runs: 0, running: 0, updated: 0, newest: r }));
+      p.runs++;
+      if (status(r, now) === "running") p.running++;
+      p.updated = Math.max(p.updated, r.updated);
+    }
+    const rows = sortBy([...projects.values()], (p) => p.updated, true).map((p) => {
+      const href = `/project/${encodeURIComponent(p.name)}`;
+      return h("tr", { class: "run", onclick: (e) => !e.target.closest("a") && go(href) },
+        h("td", {}, h("a", { class: "name", href, "data-app": true, text: p.name })),
+        h("td", { class: "num", text: String(p.runs) }),
+        h("td", {}, p.running > 0 && h("div", { class: "status" }, h("span", { class: "dot running" }), `${p.running} running`)),
+        h("td", { class: "mono", text: ago(p.updated, now) }),
+        h("td", {},
+          h("a", { class: "mono", href: `/run/${p.newest.id}`, "data-app": true, text: p.newest.name }),
+          h("span", { class: "sub", text: `  ${started(p.newest.created)}` })));
+    });
+    this.el.replaceChildren(
+      h("div", { class: "filters" },
+        h("h1", { text: "Projects" }),
+        h("span", { class: "count", text: `${projects.size} projects · ${this.runs.length} runs` })),
+      projects.size
+        ? h("table", { class: "runs" },
+            h("tr", {}, ["project", "runs", "", "last active", "newest run"].map((t, i) => h("th", { class: i === 1 ? "num" : null, text: t }))),
+            rows)
+        : h("div", { class: "empty" },
+            h("h1", { text: "No projects yet" }),
+            h("p", { text: "A project appears here with its first run." })),
+    );
+  }
+}
+
+// ---------------------------------------------------------------- project page
+
+// a project's runs side by side: a table of what tells them apart (their config) and
+// how they did (their latest metrics), and a chart per metric with a line per run
+// shown. What is shown, the sort and the chart options live in the page's address.
+class ProjectPage {
+  constructor(project) {
+    this.project = project;
+    document.title = `${project} · seaglass`;
+    main.className = "";
+    this.runs = null;
+    this.summary = [];
+    // each run's config, flattened: a run's config never changes, so it is read once
+    this.configs = new Map();
+    // each run's metrics read so far, as {rows, next, updated}, for the runs shown
+    this.metrics = new Map();
+    this.slots = new Map();
+    this.focus = null;
+
+    const q = new URLSearchParams(location.search);
+    const filter = h("input", {
+      type: "search", placeholder: "filter runs", value: q.get("q"), title: "words in a run's name, id or tags",
+      oninput: (e) => this.setParams({ q: e.target.value || null }, { table: true, charts: true }),
+    });
+    const pick = (text, title, ids) => h("button", { text, title, onclick: () => this.setShown(ids()) });
+    this.countEl = h("span", { class: "count" });
+    // every project on the server, to switch between
+    this.projectSelect = h("select", {
+      title: "compare another project's runs",
+      onchange: (e) => go(`/project/${encodeURIComponent(e.target.value)}`),
+    }, h("option", { value: project, text: project }));
+    this.expandButton = h("button", {
+      class: "expand", onclick: () => this.setParams({ table: this.expanded() ? null : "1" }, { layout: true }),
+    });
+    const sideBar = h("div", { class: "side-tools" },
+      filter,
+      h("div", { class: "scrub" },
+        h("span", { class: "dim", text: "show" }),
+        pick("all", "every run the filter matches", () => [...this.shownIds(), ...this.filtered().map((r) => r.id)]),
+        pick("none", "no runs", () => []),
+        pick(`newest ${DEFAULT_SHOWN}`, `the ${DEFAULT_SHOWN} newest runs`, () => (this.runs ?? []).slice(0, DEFAULT_SHOWN).map((r) => r.id))),
+      h("div", { class: "side-count" }, this.countEl, h("span", { class: "spacer" }), this.expandButton));
+
+    const metricsBox = h("input", {
+      type: "search", placeholder: "metrics: loss*, return", value: q.get("metrics"), title: "patterns of the metrics to chart, * any characters",
+      onchange: (e) => this.setParams({ metrics: e.target.value.trim() || null }, { charts: true }),
+    });
+    const smoothBox = h("input", {
+      type: "number", min: 0, step: 1, placeholder: "0", value: q.get("smooth"), title: "a moving average over this many points",
+      onchange: (e) => this.setParams({ smooth: Number(e.target.value) > 1 ? String(Math.floor(e.target.value)) : null }, { charts: true }),
+      onkeydown: (e) => e.key === "Enter" && e.target.blur(),
+    });
+    const logButton = h("button", {
+      text: "log y", class: q.get("log") === "1" ? "on" : null, title: "a log-scale y axis",
+      onclick: () => {
+        const on = this.param("log") !== "1";
+        logButton.classList.toggle("on", on);
+        this.setParams({ log: on ? "1" : null }, { charts: true });
+      },
+    });
+    const chartBar = h("div", { class: "topbar" },
+      h("span", { class: "stitle", text: "charts" }),
+      metricsBox,
+      h("span", { class: "scrub" }, h("span", { class: "dim", text: "smooth" }), smoothBox),
+      logButton);
+
+    // the runs down the side, each turned on and off in the charts; expanded, the
+    // side is the whole table and the charts step aside
+    this.tableEl = h("div", { class: "table-wrap" });
+    this.chartsEl = h("div", { class: "grid charts compare" });
+    this.layoutEl = h("div", { class: "project-layout" },
+      h("aside", { class: "runs-side" }, sideBar, this.tableEl),
+      h("section", { class: "charts-side" }, chartBar, this.chartsEl));
+    this.el = h("div", { class: "page wide" },
+      h("div", { class: "filters" },
+        h("h1", { text: project }),
+        h("label", {}, "project", this.projectSelect),
+        h("span", { class: "spacer" }),
+        h("a", { href: `/?project=${encodeURIComponent(project)}`, "data-app": true, text: "run list" })),
+      this.layoutEl);
+    main.replaceChildren(this.el);
+    this.applyLayout();
+    main.scrollTop = 0;
+
+    this.onResize = () => {
+      clearTimeout(this.resizeTimer);
+      this.resizeTimer = setTimeout(() => this.renderCharts(), 150);
+    };
+    addEventListener("resize", this.onResize);
+    this.poll();
+    this.timer = setInterval(() => document.visibilityState === "visible" && this.poll(), RUNS_POLL_MS);
+  }
+
+  destroy() {
+    this.dead = true;
+    clearInterval(this.timer);
+    removeEventListener("resize", this.onResize);
+  }
+
+  // ------------------------------------------------------------ the address
+
+  param(key) {
+    return new URLSearchParams(location.search).get(key);
+  }
+
+  // set (or, for null, drop) parameters, then redraw what they change
+  setParams(changes, { table = false, charts = false, layout = false } = {}) {
+    const q = new URLSearchParams(location.search);
+    for (const [k, v] of Object.entries(changes)) {
+      if (v == null) q.delete(k);
+      else q.set(k, v);
+    }
+    const s = q.toString();
+    history.replaceState(null, "", `/project/${encodeURIComponent(this.project)}${s ? `?${s}` : ""}`);
+    if (layout) this.applyLayout();
+    if (this.runs == null) return;
+    if (table || layout) this.renderTable();
+    if (charts || (layout && !this.expanded())) this.renderCharts();
+  }
+
+  // whether the side is expanded into the whole table
+  expanded() {
+    return this.param("table") === "1";
+  }
+
+  applyLayout() {
+    const on = this.expanded();
+    this.layoutEl.classList.toggle("expanded", on);
+    this.expandButton.textContent = on ? "← charts" : "table →";
+    this.expandButton.title = on ? "back to the charts" : "every run's config and latest metrics, as a table";
+  }
+
+  // ------------------------------------------------------------ which runs
+
+  // the runs shown in the charts: those picked, or the newest few if none were
+  shownIds() {
+    const picked = this.param("runs");
+    if (picked == null) return (this.runs ?? []).slice(0, DEFAULT_SHOWN).map((r) => r.id);
+    return picked.split(",").filter(Boolean);
+  }
+
+  shown() {
+    const ids = new Set(this.shownIds());
+    return (this.runs ?? []).filter((r) => ids.has(r.id));
+  }
+
+  filtered() {
+    const q = this.param("q") ?? "";
+    return (this.runs ?? []).filter((r) => runMatches(r, q));
+  }
+
+  // what the charts draw: the runs shown that the filter matches
+  plotted() {
+    const ids = new Set(this.filtered().map((r) => r.id));
+    return this.shown().filter((r) => ids.has(r.id));
+  }
+
+  async setShown(ids) {
+    if (this.runs == null) return;
+    const known = new Set((this.runs ?? []).map((r) => r.id));
+    this.setParams({ runs: [...new Set(ids)].filter((id) => known.has(id)).join(",") });
+    this.slots = assignSlots(this.slots, this.shown().map((r) => r.id));
+    this.renderTable();
+    this.renderCharts();
+    if (await this.loadMetrics()) this.renderCharts();
+  }
+
+  toggle(id) {
+    const ids = this.shownIds();
+    this.setShown(ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]);
+  }
+
+  colorOf(id) {
+    const slot = this.slots.get(id) ?? 0;
+    return { color: SERIES[slot % SERIES.length], dashed: slot % SLOTS >= SERIES.length };
+  }
+
+  // ------------------------------------------------------------ reading
+
+  async poll() {
+    if (this.polling || this.dead) return;
+    this.polling = true;
+    let changed = false;
+    try {
+      const all = await api("/api/runs");
+      setConnected(true);
+      this.renderProjects(all);
+      const runs = all.filter((r) => r.project === this.project);
+      changed = this.runs == null || runs.length !== this.runs.length;
+      this.runs = runs;
+      this.slots = assignSlots(this.slots, this.shown().map((r) => r.id));
+      await Promise.all([this.loadSummary(), this.loadConfigs()]);
+      changed = (await this.loadMetrics()) || changed;
+    } catch {
+      setConnected(false);
+      this.runs ??= [];
+    } finally {
+      this.polling = false;
+    }
+    if (this.dead) return;
+    this.renderTable();
+    if (changed) this.renderCharts();
+  }
+
+  renderProjects(all) {
+    if (document.activeElement === this.projectSelect) return;
+    const counts = new Map([[this.project, 0]]);
+    for (const r of all) counts.set(r.project, (counts.get(r.project) ?? 0) + 1);
+    const names = [...counts.keys()].sort();
+    this.projectSelect.replaceChildren(...names.map((p) =>
+      h("option", { value: p, text: `${p} (${counts.get(p)})`, selected: p === this.project })));
+    this.projectSelect.disabled = names.length < 2;
+  }
+
+  // the summary patterns of the runs' bundles, newest first
+  async loadSummary() {
+    const hashes = [...new Set(this.runs.map((r) => r.bundle).filter(Boolean))];
+    const layouts = await Promise.all(hashes.map(bundleLayout));
+    this.summary = [...new Set(layouts.flatMap((l) => (l?.contract === CONTRACT && Array.isArray(l.summary) ? l.summary : [])))];
+  }
+
+  // the configs not read yet: the run list leaves them out
+  async loadConfigs() {
+    const missing = this.runs.filter((r) => !this.configs.has(r.id));
+    for (let i = 0; i < missing.length; i += CONFIG_BATCH) {
+      await Promise.allSettled(
+        missing.slice(i, i + CONFIG_BATCH).map(async (r) => {
+          const run = await api(`/api/runs/${r.id}`);
+          this.configs.set(r.id, flattenConfig(run.config));
+        }),
+      );
+      if (this.dead) return;
+    }
+  }
+
+  // the metrics of the runs shown that logged since they were last read; whether any
+  // came
+  async loadMetrics() {
+    const stale = this.shown().filter((r) => this.metrics.get(r.id)?.updated !== r.updated);
+    const got = await Promise.allSettled(
+      stale.map(async (r) => {
+        const m = this.metrics.get(r.id) ?? { rows: [], next: 0, updated: null };
+        const res = await api(`/api/runs/${r.id}/metrics?since=${m.next}`);
+        m.rows.push(...res.rows);
+        m.next = res.next;
+        m.updated = r.updated;
+        this.metrics.set(r.id, m);
+        return res.rows.length > 0;
+      }),
+    );
+    return got.some((g) => g.status === "fulfilled" && g.value);
+  }
+
+  // ------------------------------------------------------------ the table
+
+  metricColumns() {
+    const names = [];
+    const seen = new Set();
+    for (const r of this.runs) {
+      for (const k of Object.keys(r.latest ?? {})) {
+        if (seen.has(k)) continue;
+        seen.add(k);
+        names.push(k);
+      }
+    }
+    const summary = matchNames(this.summary, names);
+    return summary.length ? summary : names;
+  }
+
+  renderTable() {
+    const runs = this.runs;
+    if (!runs.length) {
+      this.countEl.textContent = "";
+      this.tableEl.replaceChildren(h("div", { class: "empty" }, h("h1", { text: "No runs yet" }), h("p", { text: `Runs logged to the project ${this.project} show up here.` })));
+      return;
+    }
+    const shownIds = new Set(this.shownIds());
+    const filtered = this.filtered();
+    // at the side, a run is its toggle and name; expanded, the whole comparison
+    const wide = this.expanded();
+    const config = wide ? configColumns(runs.map((r) => this.configs.get(r.id) ?? {})) : [];
+    const metrics = wide ? this.metricColumns() : [];
+    const sort = parseSort(this.param("sort"));
+    const now = Date.now() / 1000;
+    const value = (r, key) => {
+      if (key.startsWith("c:")) return this.configs.get(r.id)?.[key.slice(2)];
+      if (key.startsWith("m:")) return r.latest?.[key.slice(2)];
+      if (key === "status") return status(r, now);
+      return r[key];
+    };
+    const rows = sortBy(filtered, (r) => value(r, sort.key), sort.desc);
+    this.countEl.textContent = `${this.plotted().length} shown · ${filtered.length} of ${runs.length} runs`;
+
+    // a header sorts by its column; again, the other way
+    const th = (key, text, cls = "") => {
+      const on = sort.key === key;
+      const firstDesc = !(key === "name" || key === "status" || key.startsWith("c:"));
+      const next = on ? !sort.desc : firstDesc;
+      return h("th", {
+        class: `sortable ${cls}${on ? " on" : ""}`, title: `sort by ${text}`,
+        onclick: () => this.setParams({ sort: key === "created" && next ? null : `${next ? "-" : ""}${key}` }, { table: true }),
+      }, text, on ? (sort.desc ? " ↓" : " ↑") : "");
+    };
+    const base = [h("th", { class: "pick" }), th("name", "run"), wide && [th("created", "started"), th("step", "step", "num")]];
+    const groups = wide && h("tr", { class: "groups" },
+      h("th", { colspan: 4 }),
+      config.length > 0 && h("th", { colspan: config.length, class: "group", text: "config" }),
+      metrics.length > 0 && h("th", { colspan: metrics.length, class: "group", text: "latest" }));
+    const head = h("tr", {}, base,
+      config.map((k, i) => th(`c:${k}`, k, `num${i === 0 ? " first" : ""}`)),
+      metrics.map((k, i) => th(`m:${k}`, k, `num${i === 0 ? " first" : ""}`)));
+
+    const body = rows.map((r) => {
+      const on = shownIds.has(r.id);
+      const st = status(r, now);
+      const cfg = this.configs.get(r.id);
+      return h("tr", {
+        class: `run${on ? " on" : ""}`,
+        onclick: (e) => !e.target.closest("a") && this.toggle(r.id),
+        onmouseenter: () => this.setFocus(on ? r.id : null),
+        onmouseleave: () => this.setFocus(null),
+      },
+        h("td", { class: "pick" },
+          h("button", { class: "eye", "aria-pressed": String(on), title: on ? "shown in the charts: click to hide" : "hidden: click to show in the charts" }, eye(on))),
+        h("td", { class: "who" },
+          h("div", { class: "line1" },
+            h("i", { class: "swatch", style: on ? swatchStyle(this.colorOf(r.id)) : null }),
+            h("a", { class: "name", href: `/run/${r.id}`, "data-app": true, text: r.name, title: `open ${r.name}` }),
+            (r.tags ?? []).map((t) => h("span", { class: "chip", text: t }))),
+          h("div", { class: "sub" }, h("span", { class: `dot ${st}`, title: st }), activity(r, now) || (wide ? r.id : `${st} · ${progress(r) || "no steps"}`))),
+        wide && [h("td", { class: "mono", text: started(r.created) }), h("td", { class: "num", text: progress(r) })],
+        config.map((k, i) => h("td", { class: `num${i === 0 ? " first" : ""}`, text: cfg ? configText(cfg[k]) : "…" })),
+        metrics.map((k, i) => h("td", { class: `num${i === 0 ? " first" : ""}`, text: fmt(r.latest?.[k]) })));
+    });
+    const scrolled = this.tableEl.scrollLeft;
+    this.tableEl.replaceChildren(h("table", { class: `runs compare${wide ? "" : " compact"}` }, h("thead", {}, groups, head), h("tbody", {}, body)));
+    this.tableEl.scrollLeft = scrolled;
+  }
+
+  // ------------------------------------------------------------ the charts
+
+  renderCharts() {
+    // expanded, the charts are out of sight: they're drawn on the way back
+    if (this.runs == null || this.expanded()) return;
+    hideTip();
+    const runs = this.plotted();
+    const rowsOf = (r) => this.metrics.get(r.id)?.rows ?? [];
+    const patterns = (this.param("metrics") ?? "").split(/[\s,]+/).filter(Boolean);
+    const names = matchNames(patterns.length ? patterns : [...this.summary, "*"], metricNames(runs.flatMap(rowsOf)));
+    const over = Number(this.param("smooth")) || 0;
+    const log = this.param("log") === "1";
+
+    if (!names.length) {
+      const why = !runs.length ? "No runs shown: pick some in the table." : patterns.length ? "No metric of the runs shown matches." : "The runs shown haven't logged metrics yet.";
+      this.chartsEl.replaceChildren(h("div", { class: "dim", text: why }));
+      return;
+    }
+    this.chartsEl.replaceChildren(...names.map((key) => {
+      const series = runs.flatMap((r) => {
+        const raw = seriesPoints(rowsOf(r), key);
+        if (!raw.length) return [];
+        const points = smooth(raw, over);
+        return [{ id: r.id, name: r.name, ...this.colorOf(r.id), points, raw: points === raw ? null : raw }];
+      });
+      const holder = h("div", { class: "chart-holder" });
+      const card = h("div", { class: "card chart-card" },
+        h("div", { class: "card-hdr" }, h("span", { class: "title", text: label(key), title: key })),
+        holder);
+      // drawn once the card is laid out, so the chart knows its width
+      requestAnimationFrame(() => {
+        if (!holder.isConnected) return;
+        holder.replaceChildren(lineChart(series, holder.clientWidth - 8, { log }).el);
+        this.applyFocus(holder);
+      });
+      return card;
+    }));
+  }
+
+  // the run hovered in the table or legend stands out in every chart
+  setFocus(id) {
+    this.focus = id;
+    this.applyFocus(this.chartsEl);
+  }
+
+  applyFocus(within) {
+    this.chartsEl.classList.toggle("focus", this.focus != null);
+    for (const p of within.querySelectorAll("path[data-id]")) p.classList.toggle("hl", p.getAttribute("data-id") === this.focus);
+  }
+}
+
+// the toggle that shows a run in the charts, or hides it
+function eye(on) {
+  return h("svg", { class: "eye-icon", viewBox: "0 0 16 16", width: 16, height: 16, "aria-hidden": "true" },
+    h("path", { d: "M1.5 8C3.5 4.6 5.7 3.3 8 3.3s4.5 1.3 6.5 4.7c-2 3.4-4.2 4.7-6.5 4.7S3.5 11.4 1.5 8Z" }),
+    h("circle", { cx: 8, cy: 8, r: 2.1 }),
+    !on && h("line", { x1: 2.5, y1: 13.5, x2: 13.5, y2: 2.5 }));
 }
 
 // ---------------------------------------------------------------- run page
@@ -489,7 +972,7 @@ class RunPage {
     const argv = Array.isArray(prov.argv) ? prov.argv.join(" ") : null;
     this.head.replaceChildren(
       h("div", { class: "crumbs" },
-        h("a", { href: `/?project=${encodeURIComponent(run.project)}`, "data-app": true, text: run.project }),
+        h("a", { href: `/project/${encodeURIComponent(run.project)}`, "data-app": true, text: run.project, title: "compare the project's runs" }),
         h("span", { class: "id", text: run.id })),
       h("h1", { text: run.name }),
       h("div", { class: "meta" },
@@ -719,19 +1202,13 @@ const PANELS = {
     const sections = Object.entries(config).filter(([, v]) => isSection(v));
     const flat = Object.entries(config).filter(([, v]) => !isSection(v));
     if (flat.length) sections.unshift(["config", Object.fromEntries(flat)]);
-    const value = (v) => {
-      if (v == null) return "–";
-      if (Array.isArray(v) && v.every((x) => typeof x !== "object")) return v.join(", ");
-      if (typeof v === "object") return JSON.stringify(v);
-      return String(v);
-    };
     slot.append(
       sections.length
         ? h("div", { class: "config-grid" },
             sections.map(([name, values]) =>
               h("div", { class: "card" },
                 h("div", { class: "card-hdr" }, h("span", { class: "title", text: label(name) })),
-                h("table", {}, Object.entries(values).map(([k, v]) => h("tr", {}, h("td", { text: k }), h("td", { text: value(v) })))))))
+                h("table", {}, Object.entries(values).map(([k, v]) => h("tr", {}, h("td", { text: k }), h("td", { text: configText(v) })))))))
         : h("div", { class: "dim", text: "no config" }),
     );
     return {};

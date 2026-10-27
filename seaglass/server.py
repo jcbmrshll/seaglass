@@ -175,7 +175,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(store.bundle(hash))
             case ["bundles", hash, *path] if path:
                 self._file(store.bundle_path(hash, "/".join(path)), cache=True)
-            case [] | ["run", _]:
+            case [] | ["run", _] | ["projects"] | ["project", _]:
                 # the frontend routes in the browser, so every page is index.html
                 self._file(STATIC_DIR / "index.html")
             case ["static", *path] if (
