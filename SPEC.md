@@ -381,7 +381,7 @@ Every method returns a promise. Arguments and results are structured-clonable
 | `arrays(path)` | the arrays of an `.npz` file (§7.4) |
 | `theme()` | `{mode: "light" \| "dark", vars: {"--sg-fg": "#3f2606", …}}` (§7.5) |
 | `location()` | `{tab, step, state}` (§7.6) |
-| `navigate({tab, step, state})` | asks the frontend to go somewhere (§7.6); resolves once it has, or decided not to |
+| `navigate({tab, step, state, replace})` | asks the frontend to go somewhere (§7.6); resolves once it has, or decided not to |
 | `getPref(key)` | a value the bundle's project stored under `key`, or `null` |
 | `setPref(key, value)` | stores a JSON value of at most 64 KiB under `key`, for this project, in this browser |
 
@@ -437,9 +437,16 @@ A run page has a **location**:
 - `state`: string keys to string values that views keep in the page's address, such
   as which member a view has open, so a reload or a shared link opens it again.
 
-`navigate({tab, step, state})` changes any of these. Fields left out stay as they
-are; in `state`, a key set to `null` is removed and other keys are kept. A frontend
-MAY refuse a request it cannot follow.
+`navigate({tab, step, state, replace})` changes any of these. Fields left out stay
+as they are; in `state`, a key set to `null` is removed and other keys are kept. A
+frontend MAY refuse a request it cannot follow.
+
+A frontend that keeps a history decides which changes add an entry to it (somewhere
+Back returns to). `replace: true` asks it not to: the new location replaces the
+current entry, as when a view keeps where the reader is while they step through
+something, rather than somewhere to come back to. `replace` is not part of the
+location, and is only about history: a frontend that has none, or ignores it, still
+goes to the new location.
 
 ### 7.7 Handles
 
@@ -505,7 +512,7 @@ Every panel has a `type` and may have a `title` and a `width`.
 |---|---|---|
 | `tiles` | `metrics`: patterns, default `summary` | each matching metric's latest value (as of the location's step) |
 | `chart` | `metrics`: patterns (required); `split`: bool, default `false`; `groups`: object, group name → pattern or patterns, with `split` only; `smooth`: integer ≥ 0, default `0`; `log`: bool, default `false` | the matching metrics against step, as one chart, or with `split` one chart per group (§8.4), `groups` naming groups of its own; `smooth` draws a trailing moving average over that many points over the faint raw line; `log` uses a log-scale y axis |
-| `media` | `keys`: patterns (required) | for each matching key, one card with that key's entries, drawn by the renderer for each entry's type, and a scrubber over the entries' steps |
+| `media` | `keys`: patterns (required); `columns`: integer ≥ 1 | for each matching key, one card with that key's entries, drawn by the renderer for each entry's type, and a scrubber over the entries' steps; `columns` puts at most that many cards in a row (default: the frontend's choice), so `1` gives each card the panel's full width, and a frontend MAY still put fewer in a row on a narrow screen |
 | `view` | `module`: path in the bundle (required); `props`: object | a custom module (§7), given `props` as `data` |
 | `config` | | the run's config, as tables |
 

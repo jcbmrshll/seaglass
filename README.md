@@ -134,7 +134,7 @@ The panel types:
 |---|---|
 | `tiles` | latest values |
 | `chart` | metrics by name or glob, with `smooth`, `log` and `split` options |
-| `media` | one key's entries, with a step scrubber |
+| `media` | a card per matching key, with a step scrubber; `columns` caps the cards in a row (`1`: each the full width) |
 | `view` | a custom module |
 | `config` | the run's config |
 
@@ -165,7 +165,9 @@ export async function render({ el, data, run, host }) {
   - `file`, `json`, `arrays`: the run's files;
   - `theme`: the frontend's colours, which are also set as `--sg-*` CSS variables;
   - `location`, `navigate`: the step the page is looking at, its tab, and view state
-    kept in the page's address;
+    kept in the page's address. `navigate({state, replace: true})` updates the address
+    without adding a Back entry, for state that tracks where the reader is (a move in
+    a game they're stepping through) rather than somewhere to come back to;
   - `getPref`, `setPref`: preferences kept for the project.
 
 Each module instance runs in its own sandboxed frame with an opaque origin, so a

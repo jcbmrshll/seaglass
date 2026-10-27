@@ -6,7 +6,7 @@
 import { h } from "./dom.js";
 import { activity, ago, duration, fmt, progress, started, status } from "./format.js";
 import {
-  CONTRACT, applyNavigate, entriesByKey, entryIndexAt, locationQuery, matchNames, metricNames,
+  CONTRACT, applyNavigate, entriesByKey, entryIndexAt, locationQuery, matchNames, mediaColumns, metricNames,
   parseLocation, resolveLayout, seriesPoints, smooth, splitGroups, valueAt,
 } from "./layout.js";
 import { SERIES, hideTip, lineChart, swatchStyle } from "./chart.js";
@@ -847,11 +847,12 @@ class RunPage {
   }
 
   navigate(req) {
-    if (!req || typeof req !== "object") throw new Error("navigate takes {tab, step, state}");
+    if (!req || typeof req !== "object") throw new Error("navigate takes {tab, step, state, replace}");
     if ("tab" in req && req.tab != null && !this.layout.tabs.some((t) => t.title === req.tab)) throw new Error(`no tab ${req.tab}`);
     const next = applyNavigate(this.loc, req);
-    // a new tab or view state is somewhere to come back to; a step isn't
-    const push = ("tab" in req && next.tab !== this.loc.tab) || "state" in req;
+    // a new tab or view state is somewhere to come back to, unless the module says
+    // it isn't; a step isn't
+    const push = !req.replace && (("tab" in req && next.tab !== this.loc.tab) || "state" in req);
     this.setLocation(next, { push });
   }
 
@@ -1154,6 +1155,11 @@ const PANELS = {
   media(page, slot, panel) {
     titled(slot, panel.title);
     const el = h("div", { class: "grid media" });
+    const columns = mediaColumns(panel);
+    if (columns) {
+      el.classList.add("cols");
+      el.style.setProperty("--cols", columns);
+    }
     slot.append(el);
     const cards = new Map();
     const draw = () => {
