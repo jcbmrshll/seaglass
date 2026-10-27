@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { activity, ago, duration, fmt, fmtTick, progress, status } from "../../seaglass/static/format.js";
+import { activity, ago, duration, fmt, fmtTick, progress, status, withUnit } from "../../seaglass/static/format.js";
 import { formatArray } from "../../seaglass/static/generic.js";
 
 test("numbers", () => {
@@ -36,4 +36,12 @@ test("array previews", () => {
   assert.equal(formatArray({ shape: [2, 2], data: Int32Array.from([1, 2, 3, 4]) }), "[[1, 2],\n [3, 4]]");
   assert.equal(formatArray({ shape: [3], data: BigInt64Array.from([1n, 2n, 3n]) }), "[1, 2, 3]");
   assert.equal(formatArray({ shape: [5], data: Float32Array.from([1, 2, 3, 4, 5]) }, 2), "[1, 2, …]");
+});
+
+test("units", () => {
+  assert.equal(withUnit("0.41", "nats"), "0.41 nats");
+  assert.equal(withUnit("12", "%"), "12%");
+  assert.equal(withUnit("0.41", null), "0.41");
+  // no value, no unit
+  assert.equal(withUnit("–", "s"), "–");
 });

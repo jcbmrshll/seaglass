@@ -48,6 +48,74 @@ def test_notes_are_passed_or_from_the_environment(server: Server, monkeypatch, c
     m.finish()
 
 
+def test_describe_before_and_after_start(server: Server, capsys):
+    m = Monitor(server.url, project="test")
+    td = m.describe("td_error", "mean |TD error|", log=True, better="lower")
+    assert td == "td_error"
+    m.describe("return", headline=True, better="up")
+    m.describe("long", "x" * 3000, unit="u" * 40)
+    m.start()
+    # before start, descriptions go with the run
+    declared = server.get(f"/api/runs/{m.run_id}")["declared"]
+    assert declared == {
+        "td_error": {"description": "mean |TD error|", "log": True, "better": "lower"},
+        "return": {"headline": True},
+        "long": {"description": "x" * 2000, "unit": "u" * 32},
+    }
+    err = capsys.readouterr().err
+    assert "better is 'higher' or 'lower'" in err and "cut to 2000" in err
+    # after, they're sent as they come, each replacing what its pattern said
+    posts = []
+    real = m._post
+    m._post = lambda path, obj: posts.append(path) or real(path, obj)  # type: ignore[method-assign]
+    m.describe("eps*", "exploration")
+    m.describe("td_error", "mean |TD error|, again", unit="nats")
+    m.describe("eps*", "exploration")  # the same again: nothing to send
+    m.flush()
+    declared = server.get(f"/api/runs/{m.run_id}")["declared"]
+    assert list(declared) == ["td_error", "return", "long", "eps*"]
+    assert declared["td_error"] == {
+        "description": "mean |TD error|, again",
+        "unit": "nats",
+    }
+    assert declared["eps*"] == {"description": "exploration"}
+    assert len([p for p in posts if p.endswith("/declared")]) <= 2
+    m.finish()
+
+
+def test_what_isnt_described_or_logged_is_said(server: Server, capsys):
+    # a run that describes nothing hears nothing about it
+    m = started(server)
+    m.log(0, {"loss": 1.0})
+    m.finish()
+    assert "description" not in capsys.readouterr().err
+
+    m = Monitor(server.url, project="test")
+    m.describe("loss/*", "per head")
+    m.describe("ep", "episodes")
+    m.describe("loss", "a split chart's group: described, not logged")
+    m.describe("td_error", "renamed in the script, not here")
+    m.start()
+    m.log(0, {"loss/policy": 1.0, "loss/value": 2.0, "tderr": 0.1, "acc": 0.5})
+    m.flush()
+    err = capsys.readouterr().err
+    assert "logged without a description: acc, tderr" in err
+    m.log(1, {"tderr": 0.1, "ep": Data([1]), "grad": 3.0})
+    m.finish()
+    # each name once; described patterns that matched something aren't mentioned
+    assert capsys.readouterr().err.splitlines() == [
+        "seaglass: logged without a description: grad",
+        "seaglass: described but never logged: td_error",
+    ]
+
+    # a run that crashes has good reason not to have logged everything
+    m = Monitor(server.url, project="test")
+    m.describe("later", "logged at the end")
+    m.start()
+    m.finish("crashed")
+    assert "never logged" not in capsys.readouterr().err
+
+
 def test_url_from_the_environment(server: Server, monkeypatch):
     monkeypatch.setenv("SEAGLASS_URL", server.url + "/")
     m = Monitor(project="env")

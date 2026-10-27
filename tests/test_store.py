@@ -23,7 +23,7 @@ def test_create_defaults(store: RunStore):
     assert meta["project"] == "default"
     assert meta["status"] == "running"
     assert meta["step"] is None and meta["latest"] == {} and meta["tags"] == []
-    assert meta["notes"] is None
+    assert meta["notes"] is None and meta["declared"] == {}
     assert meta["name"].endswith("-1")
     # the next run of the project is numbered after it
     assert store.create({})["name"].endswith("-2")
@@ -46,6 +46,17 @@ def test_create_defaults(store: RunStore):
         {"provenance": []},
         {"notes": 3},
         {"notes": "x" * 10001},
+        {"declared": []},
+        {"declared": {"loss": "a description"}},
+        {"declared": {"loss": None}},
+        {"declared": {"": {}}},
+        {"declared": {"loss": {"description": 3}}},
+        {"declared": {"loss": {"description": "x" * 2001}}},
+        {"declared": {"loss": {"unit": "x" * 33}}},
+        {"declared": {"loss": {"log": "yes"}}},
+        {"declared": {"loss": {"headline": 1}}},
+        {"declared": {"loss": {"better": "up"}}},
+        {"declared": {f"m{i}": {"description": "x" * 2000} for i in range(40)}},
     ],
 )
 def test_create_invalid(store: RunStore, body):
@@ -195,13 +206,56 @@ def test_notes(store: RunStore):
         store.set_notes("20990101-000000-dead", {"notes": "x"})
 
 
-def test_runs_stored_before_notes_have_none(store: RunStore):
+def test_declarations(store: RunStore):
+    loss = {"description": "TD loss", "log": True, "better": "lower"}
+    meta = store.create({"declared": {"loss": loss, "acc": {"headline": True}}})
+    run = meta["id"]
+    assert meta["declared"] == {"loss": loss, "acc": {"headline": True}}
+    store.finish(run, {})
+    before = store.get(run)
+    # a pattern given replaces its declaration whole, in its place; a new one goes
+    # last; null removes one
+    store.declare(
+        run,
+        {
+            "declared": {
+                "loss": {"unit": "nats"},
+                "eps*": {"description": "exploration", "future": [1]},
+                "acc": None,
+                "gone": None,
+            }
+        },
+    )
+    after = store.get(run)
+    assert list(after["declared"].items()) == [
+        ("loss", {"unit": "nats"}),
+        # fields the server doesn't know are kept
+        ("eps*", {"description": "exploration", "future": [1]}),
+    ]
+    # like notes, declarations aren't the run logging
+    assert after["status"] == "finished" and after["updated"] == before["updated"]
+    assert store.list()[0]["declared"] == after["declared"]
+    for bad in [
+        {},
+        [],
+        {"declared": None},
+        {"declared": {"loss": {"log": 1}}},
+        {"declared": {f"m{i}": {"description": "x" * 2000} for i in range(40)}},
+    ]:
+        with pytest.raises(Invalid):
+            store.declare(run, bad)
+    assert store.get(run)["declared"] == after["declared"]
+    with pytest.raises(NotFound):
+        store.declare("20990101-000000-dead", {"declared": {}})
+
+
+def test_runs_stored_before_notes_and_declarations_have_none(store: RunStore):
     run = store.create({})["id"]
     path = store.root / run / "meta.json"
     meta = json.loads(path.read_text())
-    del meta["notes"]
+    del meta["notes"], meta["declared"]
     path.write_text(json.dumps(meta))
-    assert store.get(run)["notes"] is None
+    assert store.get(run)["notes"] is None and store.get(run)["declared"] == {}
     assert store.list()[0]["notes"] is None
 
 

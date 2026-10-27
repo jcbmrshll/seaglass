@@ -4,10 +4,10 @@
 // as text. It polls, reading metrics and media incrementally.
 
 import { h } from "./dom.js";
-import { activity, ago, duration, fmt, progress, started, status } from "./format.js";
+import { activity, ago, duration, fmt, progress, started, status, withUnit } from "./format.js";
 import {
-  CONTRACT, applyNavigate, chartNotes, describe, descriptionList, entriesByKey, entryIndexAt, locationQuery, matchNames, mediaColumns, metricNames,
-  parseLocation, resolveLayout, seriesPoints, smooth, splitGroups, valueAt,
+  CONTRACT, applyNavigate, bestValue, chartLog, chartNotes, declared, declaredList, describe, entriesByKey, entryIndexAt, headlines, locationQuery, matchNames,
+  mediaColumns, metricNames, parseLocation, resolveLayout, seriesPoints, smooth, splitGroups, tileNames, valueAt,
 } from "./layout.js";
 import { SERIES, hideTip, lineChart, swatchStyle } from "./chart.js";
 import {
@@ -70,7 +70,7 @@ function bundleLayout(hash) {
 
 // ---------------------------------------------------------------- descriptions
 
-// what a metric or media key is (SPEC.md §8.1), shown beside it by a button that opens
+// what a metric or media key is (SPEC.md §3.3), shown beside it by a button that opens
 // it: one open at a time, as {id, anchor, notes}. Cards are redrawn as a run logs, so
 // a button drawn again with the same id takes the open one over.
 let openNote = null;
@@ -201,16 +201,7 @@ class RunList {
       setConnected(false);
       if (this.runs == null) this.runs = [];
     }
-    if (this.dead) return;
-    // the summaries of the runs' bundles, before drawing them
-    const summaries = new Map();
-    await Promise.all(
-      [...new Set(this.runs.map((r) => r.bundle).filter(Boolean))].map(async (hash) => {
-        const layout = await bundleLayout(hash);
-        summaries.set(hash, layout?.contract === CONTRACT && Array.isArray(layout.summary) ? layout.summary : []);
-      }),
-    );
-    if (!this.dead && !this.el.contains(document.activeElement)) this.render(summaries);
+    if (!this.dead && !this.el.contains(document.activeElement)) this.render();
   }
 
   filters() {
@@ -226,7 +217,7 @@ class RunList {
     this.poll();
   }
 
-  render(summaries) {
+  render() {
     const f = this.filters();
     const runs = this.runs;
     const uniq = (xs) => [...new Set(xs.filter(Boolean))].sort();
@@ -246,9 +237,10 @@ class RunList {
         options.map((o) => h("option", { value: o, text: o, selected: o === f[key] }))));
     const search = h("input", { type: "search", placeholder: "name, id or notes", value: f.q || null, onchange: (e) => this.setFilter("q", e.target.value) });
 
-    // each run's summary metrics: its bundle's patterns over what it logged
-    const summaryOf = (r) => matchNames(summaries.get(r.bundle) ?? [], Object.keys(r.latest ?? {}));
-    // one project: a column per summary metric; several: the values in one column
+    // each run's headline metrics, as it declared them, among what it logged
+    const summaryOf = (r) => headlines(declaredList(r.declared), Object.keys(r.latest ?? {}));
+    const unitOf = (r, k) => declared(declaredList(r.declared), k, "unit");
+    // one project: a column per headline metric; several: the values in one column
     const columns = f.project ? [...new Set(shown.flatMap(summaryOf))] : [];
     const head = h("tr", {},
       ["", "run", "project", "tags", "branch", "started", "time", "step"].map((t) => h("th", { text: t })),
@@ -271,8 +263,8 @@ class RunList {
         h("td", { class: "mono", text: r.status === "running" ? `${duration(end - r.created)} · ${ago(r.updated, now)}` : duration(end - r.created) }),
         h("td", { class: "num", text: progress(r) }),
         f.project
-          ? columns.map((c) => h("td", { class: "num", text: summary.includes(c) ? fmt(r.latest[c]) : "" }))
-          : h("td", {}, summary.slice(0, 4).map((k) => h("span", { class: "kv" }, `${k} `, h("b", { text: fmt(r.latest[k]) }), "  "))),
+          ? columns.map((c) => h("td", { class: "num", text: summary.includes(c) ? withUnit(fmt(r.latest[c]), unitOf(r, c)) : "" }))
+          : h("td", {}, summary.slice(0, 4).map((k) => h("span", { class: "kv" }, `${k} `, h("b", { text: withUnit(fmt(r.latest[k]), unitOf(r, k)) }), "  "))),
       );
     });
     this.el.replaceChildren(
@@ -377,8 +369,8 @@ class ProjectPage {
     document.title = `${project} · seaglass`;
     main.className = "";
     this.runs = null;
-    this.summary = [];
-    this.descriptions = [];
+    // what the runs declared about their metrics, newest run first (SPEC.md §3.3)
+    this.declared = [];
     // each run's config, flattened: a run's config never changes, so it is read once
     this.configs = new Map();
     // each run's metrics read so far, as {rows, next, updated}, for the runs shown
@@ -420,7 +412,7 @@ class ProjectPage {
       onkeydown: (e) => e.key === "Enter" && e.target.blur(),
     });
     const logButton = h("button", {
-      text: "log y", class: q.get("log") === "1" ? "on" : null, title: "a log-scale y axis",
+      text: "log y", class: q.get("log") === "1" ? "on" : null, title: "a log-scale y axis for every chart (off: for the metrics the runs say to)",
       onclick: () => {
         const on = this.param("log") !== "1";
         logButton.classList.toggle("on", on);
@@ -558,7 +550,8 @@ class ProjectPage {
       changed = this.runs == null || runs.length !== this.runs.length;
       this.runs = runs;
       this.slots = assignSlots(this.slots, this.shown().map((r) => r.id));
-      await Promise.all([this.loadSummary(), this.loadConfigs()]);
+      this.declared = runs.flatMap((r) => declaredList(r.declared));
+      await this.loadConfigs();
       changed = (await this.loadMetrics()) || changed;
     } catch {
       setConnected(false);
@@ -579,14 +572,6 @@ class ProjectPage {
     this.projectSelect.replaceChildren(...names.map((p) =>
       h("option", { value: p, text: `${p} (${counts.get(p)})`, selected: p === this.project })));
     this.projectSelect.disabled = names.length < 2;
-  }
-
-  // the summary patterns and descriptions of the runs' bundles, newest first
-  async loadSummary() {
-    const hashes = [...new Set(this.runs.map((r) => r.bundle).filter(Boolean))];
-    const layouts = (await Promise.all(hashes.map(bundleLayout))).filter((l) => l?.contract === CONTRACT);
-    this.summary = [...new Set(layouts.flatMap((l) => (Array.isArray(l.summary) ? l.summary : [])))];
-    this.descriptions = layouts.flatMap((l) => descriptionList(l.descriptions));
   }
 
   // the configs not read yet: the run list leaves them out
@@ -633,8 +618,8 @@ class ProjectPage {
         names.push(k);
       }
     }
-    const summary = matchNames(this.summary, names);
-    return summary.length ? summary : names;
+    const top = headlines(this.declared, names);
+    return top.length ? top : names;
   }
 
   renderTable() {
@@ -659,17 +644,23 @@ class ProjectPage {
       return r[key];
     };
     const rows = sortBy(filtered, (r) => value(r, sort.key), sort.desc);
+    // each metric's best value among the runs listed, where it says which way is better
+    const best = new Map(metrics.map((k) => [k, bestValue(this.declared, k, filtered.map((r) => r.latest?.[k]))]));
     this.countEl.textContent = `${this.plotted().length} shown · ${filtered.length} of ${runs.length} runs`;
 
     // a header sorts by its column; again, the other way
     const th = (key, text, cls = "") => {
       const on = sort.key === key;
-      const firstDesc = !(key === "name" || key === "status" || key.startsWith("c:"));
+      // a metric sorts best first, highest unless lower is better
+      const metric = key.startsWith("m:") ? key.slice(2) : null;
+      const better = metric && declared(this.declared, metric, "better");
+      const firstDesc = metric ? better !== "lower" : !(key === "name" || key === "status" || key.startsWith("c:"));
       const next = on ? !sort.desc : firstDesc;
+      const unit = metric && declared(this.declared, metric, "unit");
       return h("th", {
-        class: `sortable ${cls}${on ? " on" : ""}`, title: `sort by ${text}`,
+        class: `sortable ${cls}${on ? " on" : ""}`, title: `sort by ${text}${better ? ` (${better} is better)` : ""}`,
         onclick: () => this.setParams({ sort: key === "created" && next ? null : `${next ? "-" : ""}${key}` }, { table: true }),
-      }, text, on ? (sort.desc ? " ↓" : " ↑") : "");
+      }, text, unit && h("span", { class: "unit", text: ` ${unit}` }), on ? (sort.desc ? " ↓" : " ↑") : "");
     };
     const base = [h("th", { class: "pick" }), th("name", "run"), wide && [th("created", "started"), th("step", "step", "num")]];
     const groups = wide && h("tr", { class: "groups" },
@@ -700,7 +691,11 @@ class ProjectPage {
           h("div", { class: "sub" }, h("span", { class: `dot ${st}`, title: st }), activity(r, now) || (wide ? r.id : `${st} · ${progress(r) || "no steps"}`))),
         wide && [h("td", { class: "mono", text: started(r.created) }), h("td", { class: "num", text: progress(r) })],
         config.map((k, i) => h("td", { class: `num${i === 0 ? " first" : ""}`, text: cfg ? configText(cfg[k]) : "…" })),
-        metrics.map((k, i) => h("td", { class: `num${i === 0 ? " first" : ""}`, text: fmt(r.latest?.[k]) })));
+        metrics.map((k, i) => {
+          const v = r.latest?.[k];
+          const top = v != null && v === best.get(k);
+          return h("td", { class: `num${i === 0 ? " first" : ""}${top ? " best" : ""}`, title: top ? "the best of these runs" : null, text: fmt(v) });
+        }));
     });
     const scrolled = this.tableEl.scrollLeft;
     this.tableEl.replaceChildren(h("table", { class: `runs compare${wide ? "" : " compact"}` }, h("thead", {}, groups, head), h("tbody", {}, body)));
@@ -716,9 +711,13 @@ class ProjectPage {
     const runs = this.plotted();
     const rowsOf = (r) => this.metrics.get(r.id)?.rows ?? [];
     const patterns = (this.param("metrics") ?? "").split(/[\s,]+/).filter(Boolean);
-    const names = matchNames(patterns.length ? patterns : [...this.summary, "*"], metricNames(runs.flatMap(rowsOf)));
+    const logged = metricNames(runs.flatMap(rowsOf));
+    // the headline metrics first, unless the page asks for some by pattern
+    const top = headlines(this.declared, logged);
+    const names = patterns.length ? matchNames(patterns, logged) : [...top, ...logged.filter((n) => !top.includes(n))];
     const over = Number(this.param("smooth")) || 0;
-    const log = this.param("log") === "1";
+    // log y for every chart, or for the metrics declared log
+    const allLog = this.param("log") === "1";
 
     if (!names.length) {
       const why = !runs.length ? "No runs shown: pick some in the table." : patterns.length ? "No metric of the runs shown matches." : "The runs shown haven't logged metrics yet.";
@@ -726,15 +725,17 @@ class ProjectPage {
       return;
     }
     this.chartsEl.replaceChildren(...names.map((key) => {
+      const unit = declared(this.declared, key, "unit");
+      const log = allLog || chartLog(null, this.declared, [key]);
       const series = runs.flatMap((r) => {
         const raw = seriesPoints(rowsOf(r), key);
         if (!raw.length) return [];
         const points = smooth(raw, over);
-        return [{ id: r.id, name: r.name, ...this.colorOf(r.id), points, raw: points === raw ? null : raw }];
+        return [{ id: r.id, name: r.name, ...this.colorOf(r.id), points, raw: points === raw ? null : raw, unit }];
       });
       const holder = h("div", { class: "chart-holder" });
       const card = h("div", { class: "card chart-card" },
-        h("div", { class: "card-hdr" }, h("span", { class: "title", text: label(key), title: key }), noteButton(`compare:${key}`, describe(this.descriptions, key))),
+        h("div", { class: "card-hdr" }, h("span", { class: "title", text: label(key), title: key }), noteButton(`compare:${key}`, describe(this.declared, key))),
         holder);
       // drawn once the card is laid out, so the chart knows its width
       requestAnimationFrame(() => {
@@ -818,6 +819,7 @@ class RunPage {
         api(`/api/runs/${this.id}/media?since=0`),
       ]);
       this.run = run;
+      this.declared = declaredList(run.declared);
       this.rows = metrics.rows;
       this.metricsNext = metrics.next;
       this.media = media.rows;
@@ -854,21 +856,20 @@ class RunPage {
       setConnected(true);
       const changed = run.updated !== this.run.updated || run.status !== this.run.status;
       const notesChanged = run.notes !== this.run.notes;
+      // declarations can come after the run starts, or be changed after it ends
+      const declaredChanged = JSON.stringify(run.declared) !== JSON.stringify(this.run.declared);
       this.run = run;
+      if (declaredChanged) this.declared = declaredList(run.declared);
       this.metricsNext = metrics.next;
       this.mediaNext = media.next;
       this.rows.push(...metrics.rows);
       this.media.push(...media.rows);
       this.renderHead();
       if (notesChanged) this.renderNotes();
-      if (metrics.rows.length) {
-        this.stepBar.update();
-        this.panels.forEach((p) => p.metrics?.());
-      }
-      if (media.rows.length) {
-        this.stepBar.update();
-        this.panels.forEach((p) => p.media?.());
-      }
+      if (metrics.rows.length) this.stepBar.update();
+      if (metrics.rows.length || declaredChanged) this.panels.forEach((p) => p.metrics?.());
+      if (media.rows.length) this.stepBar.update();
+      if (media.rows.length || declaredChanged) this.panels.forEach((p) => p.media?.());
       if (changed) this.broadcast({ run });
     } catch {
       setConnected(false);
@@ -1245,12 +1246,13 @@ const PANELS = {
     titled(slot, panel.title);
     slot.append(el);
     const draw = () => {
-      let names = matchNames(panel.metrics ?? page.layout.summary, metricNames(page.rows));
-      if (panel.max) names = names.slice(0, panel.max);
-      el.replaceChildren(...names.map((k) =>
-        h("div", { class: "tile" },
-          h("div", { class: "lab" }, h("span", { text: label(k), title: k }), noteButton(`tile:${k}`, describe(page.layout.descriptions, k))),
-          h("div", { class: "val", text: fmt(page.valueAt(k)) }))));
+      const names = tileNames(panel, page.declared, metricNames(page.rows));
+      el.replaceChildren(...names.map((k) => {
+        const unit = declared(page.declared, k, "unit");
+        return h("div", { class: "tile" },
+          h("div", { class: "lab" }, h("span", { text: label(k), title: k }), noteButton(`tile:${k}`, describe(page.declared, k))),
+          h("div", { class: "val" }, fmt(page.valueAt(k)), unit && h("span", { class: "unit", text: ` ${unit}` })));
+      }));
       el.hidden = !names.length;
     };
     draw();
@@ -1356,17 +1358,18 @@ function chartCard(page, panel, group, from, updates) {
   const series = group.series.map((s, i) => {
     const raw = seriesPoints(page.rows, s.key, from);
     const smoothed = smooth(raw, panel.smooth);
-    return { ...s, color: SERIES[i % SERIES.length], points: smoothed, raw: smoothed === raw ? null : raw };
+    const unit = declared(page.declared, s.key, "unit");
+    return { ...s, color: SERIES[i % SERIES.length], points: smoothed, raw: smoothed === raw ? null : raw, unit };
   });
   const single = series.length === 1;
   const values = series.map(() => h("b"));
-  const showValues = () => series.forEach((s, i) => (values[i].textContent = fmt(page.valueAt(s.key))));
+  const showValues = () => series.forEach((s, i) => (values[i].textContent = withUnit(fmt(page.valueAt(s.key)), s.unit)));
   showValues();
   const holder = h("div", { class: "chart-holder" });
   const card = h("div", { class: "card chart-card" },
     h("div", { class: "card-hdr" },
       h("span", { class: "title", text: label(group.name), title: group.name }),
-      noteButton(`chart:${group.name}:${group.series.map((s) => s.key).join(",")}`, chartNotes(page.layout.descriptions, group)),
+      noteButton(`chart:${group.name}:${group.series.map((s) => s.key).join(",")}`, chartNotes(page.declared, group)),
       h("span", { class: "spacer" }),
       single && h("span", { class: "latest" }, values[0])),
     !single && h("div", { class: "legend" }, series.map((s, i) => h("span", { class: "key" }, h("i", { style: `background:${s.color}` }), s.name, values[i]))),
@@ -1379,7 +1382,7 @@ function chartCard(page, panel, group, from, updates) {
   // drawn once the card is laid out, so the chart knows its width
   requestAnimationFrame(() => {
     if (!holder.isConnected) return;
-    chart = lineChart(series, holder.clientWidth - 8, { log: !!panel.log, mark: page.loc.step, onPick: (s) => page.pickStep(s) });
+    chart = lineChart(series, holder.clientWidth - 8, { log: chartLog(panel, page.declared, series.map((s) => s.key)), mark: page.loc.step, onPick: (s) => page.pickStep(s) });
     holder.replaceChildren(chart.el);
   });
   return card;
@@ -1409,7 +1412,7 @@ function mediaCard(page, key) {
     const entry = entries[idx];
     hdr.replaceChildren(
       h("span", { class: "title", text: label(key), title: key }),
-      noteButton(`media:${key}`, describe(page.layout.descriptions, key)),
+      noteButton(`media:${key}`, describe(page.declared, key)),
       h("span", { class: "spacer" }),
       h("span", { class: "scrub" },
         h("button", { text: "‹", title: "previous", disabled: idx === 0, onclick: () => pick(idx - 1) }),

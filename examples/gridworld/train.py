@@ -67,6 +67,56 @@ def play(q, walls, start, goal, epsilon, rng, learn=None):
     return np.array(path), np.array(rewards), errors
 
 
+def describe(monitor: Monitor, config: dict) -> None:
+    """Say what the run logs, so whoever reads it can tell without asking."""
+    eps = config["epsilon"]
+    monitor.describe(
+        "*_return",
+        "The mean, best and worst return of the epoch's episodes, undiscounted: "
+        f"{GOAL_REWARD:+g} for reaching the goal, {STEP_REWARD:g} for every step.\n"
+        "The shorter the path to the goal, the higher the return.",
+        better="higher",
+    )
+    monitor.describe("mean_return", headline=True)
+    monitor.describe(
+        "success",
+        "The share of the epoch's episodes that reached the goal within "
+        f"{MAX_STEPS} steps.",
+        better="higher",
+        headline=True,
+    )
+    monitor.describe(
+        "episode_length",
+        "Steps per episode, averaged over the epoch. An episode that never reaches "
+        f"the goal is cut off at {MAX_STEPS}.",
+        unit="steps",
+        better="lower",
+    )
+    monitor.describe(
+        "td_error",
+        "The mean absolute TD error of the epoch's Q-learning updates. It falls as "
+        "the values settle, but rises for a while each time the agent finds a "
+        "better path.",
+        log=True,
+        better="lower",
+    )
+    monitor.describe(
+        "epsilon",
+        f"The chance of a random move, decayed linearly from {eps['start']:g} to "
+        f"{eps['end']:g} over the first {eps['decay_epochs']} epochs.",
+    )
+    monitor.describe(
+        "episode",
+        "A greedy episode (epsilon 0), played every 10 epochs: the path the agent "
+        "takes with what it has learned so far.",
+    )
+    monitor.describe(
+        "values",
+        "The value of each cell (the best of its Q-values) and the move the agent "
+        "would make there, every 10 epochs.",
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Q-learning on a gridworld, logged to seaglass."
@@ -92,6 +142,7 @@ def main() -> None:
     views = Path(__file__).parent / "views"
 
     with Monitor(args.url, project="gridworld", views=views) as monitor:
+        describe(monitor, config)
         monitor.start(config, total=args.epochs - 1)
         for epoch in range(args.epochs):
             monitor.activity(f"epoch {epoch}: training")

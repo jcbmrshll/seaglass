@@ -3,15 +3,6 @@
   "renderers": {
     "gridworld/episode": "episode.js"
   },
-  "summary": ["mean_return", "success"],
-  "descriptions": {
-    "*_return": "The mean, best and worst return of the epoch's episodes, undiscounted: +1 for reaching the goal, -0.01 for every step.\nThe shorter the path to the goal, the higher the return.",
-    "success": "The share of the epoch's episodes that reached the goal within 60 steps.",
-    "episode_length": "Steps per episode, averaged over the epoch. An episode that never reaches the goal is cut off at 60.",
-    "td_error": "The mean absolute TD error of the epoch's Q-learning updates. It falls as the values settle, but rises for a while each time the agent finds a better path.",
-    "epsilon": "The chance of a random move, decayed linearly from 1 to 0.05 over the first 100 epochs.",
-    "episode": "A greedy episode (epsilon 0), played every 10 epochs: the path the agent takes with what it has learned so far."
-  },
   "tabs": [
     {
       "title": "Training",

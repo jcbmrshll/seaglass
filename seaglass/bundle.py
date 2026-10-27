@@ -56,8 +56,8 @@ _IMPORT = re.compile(
 
 def problems(files: dict[str, bytes]) -> list[str]:
     """What breaks the module contract (SPEC.md §7.1, §8) in a bundle, as far as can
-    be seen without running it: a layout.json that isn't one, descriptions that aren't
-    text, modules it names that aren't there, and imports that aren't relative paths
+    be seen without running it: a layout.json that isn't one, fields that moved to the
+    run, modules it names that aren't there, and imports that aren't relative paths
     inside the bundle."""
     out = []
     try:
@@ -66,12 +66,12 @@ def problems(files: dict[str, bytes]) -> list[str]:
         return [f"layout.json is missing or isn't JSON ({e})"]
     if not isinstance(layout, dict) or not isinstance(layout.get("contract"), int):
         return ["layout.json needs an integer contract"]
-    descriptions = layout.get("descriptions")
-    if descriptions is not None and not (
-        isinstance(descriptions, dict)
-        and all(isinstance(t, str) for t in descriptions.values())
-    ):
-        out.append("layout.json's descriptions is an object of metric pattern -> text")
+    for field in ("summary", "descriptions"):
+        if field in layout:
+            out.append(
+                f"layout.json's {field} is no longer read: say what metrics are, and "
+                "which are the run's headline numbers, with monitor.describe()"
+            )
     named = list((layout.get("renderers") or {}).values())
     for tab in layout.get("tabs") or []:
         panels = [tab.get("panel")] + [p for row in tab.get("rows") or [] for p in row]

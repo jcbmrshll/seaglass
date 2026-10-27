@@ -11,6 +11,12 @@ export function fmt(v) {
   return v.toPrecision(3);
 }
 
+// a value as shown, followed by its unit (SPEC.md §3.3) if it has one
+export function withUnit(text, unit) {
+  if (!unit || text === "–") return text;
+  return unit === "%" ? `${text}%` : `${text} ${unit}`;
+}
+
 // axis ticks are already round numbers: just drop float noise and trailing zeros
 export function fmtTick(v) {
   return Math.abs(v) >= 1e4 ? fmt(v) : String(+v.toPrecision(6));
