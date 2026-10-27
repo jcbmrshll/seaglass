@@ -662,6 +662,16 @@ The basic frontend that ships with the reference server polls: the run list ever
 
 - a **run list**, filterable by project, tag and branch, with each run's status,
   progress, activity and summary metrics;
+- a **project list**, `/projects`: each project, with how many runs it has, how
+  many are running, when it was last active and its newest run;
+- a **project page**, `/project/<project>`, that compares the project's runs: the
+  runs down the side, each turned on or off, beside a chart per metric with a line
+  per run turned on. The side expands into a table of the config keys whose values
+  differ between the runs and their latest summary metrics, sortable by any column.
+  Its address holds the runs turned on, the sort, a filter, whether the table is
+  expanded, and the charts' metric patterns, smoothing and scale. It reads only what
+  §5 offers: the run list, each run's meta (for its config) and the metrics of the
+  runs turned on;
 - a **run page**: a header (name, status, activity, provenance), a step bar that
   sets the location's step (§7.6), and the run's layout (§8), loading the run's
   bundle and running its modules as §7 describes. Clicking a chart picks a step.

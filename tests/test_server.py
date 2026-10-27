@@ -81,7 +81,7 @@ def test_errors_are_json(server: Server):
 
 
 def test_frontend_routes(server: Server):
-    for path in ["/", "/run/20990101-000000-0000"]:
+    for path in ["/", "/run/20990101-000000-0000", "/projects", "/project/gridworld"]:
         status, headers, body = server.request("GET", path)
         assert status == 200 and headers["Content-Type"] == "text/html"
         assert b"/static/app.js" in body

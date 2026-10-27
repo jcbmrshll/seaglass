@@ -34,6 +34,10 @@ Runs are stored under `--dir`, laid out as described in SPEC.md §10. Open
 http://127.0.0.1:8008 to see:
 
 - **the run list**, filterable by project, tag and branch;
+- **the project list**, each project with its run count and latest activity;
+- **a project page**, which compares a project's runs: the runs down the side, each
+  turned on or off, and a chart per metric with a line for each run turned on. The
+  side expands into a table of how the runs' configs differ and how they did;
 - **a run page**, which draws the run's layout with its bundle.
 
 Pages poll while they're open, so a running run updates live.
