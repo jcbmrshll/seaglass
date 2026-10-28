@@ -259,15 +259,20 @@ button.eye[aria-pressed="false"] { color: var(--sg-faint); }
 .runhead .prov .argv { max-width: 60ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .runhead .note { margin-top: 6px; font: 11px var(--sg-mono); color: var(--sg-bad); }
 
-.notes { margin: -4px 0 12px; max-width: 90ch; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
-.notes .text { white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0 2px 10px; border-left: 2px solid var(--sg-accent); color: var(--sg-fg); line-height: 1.5; }
-.notes button.edit { border: 0; background: none; padding: 0; color: var(--sg-faint); }
-.notes button.edit:hover { background: none; color: var(--sg-accent); }
-.notes.none button.edit { color: var(--sg-dim); }
-.notes textarea { width: 100%; box-sizing: border-box; font: 13px/1.5 var(--sg-font); color: var(--sg-fg); background: var(--sg-well); border: 1px solid var(--sg-edge); padding: 6px 8px; resize: vertical; }
-.notes textarea:focus { outline: none; border-color: var(--sg-accent); }
-.notes .actions { display: flex; align-items: center; gap: 6px; font: 11px var(--sg-mono); }
-.notes .actions .error { color: var(--sg-bad); }
+/* the notes and conclusions, side by side when both are empty */
+.texts { margin: -4px 0 12px; max-width: 90ch; display: flex; flex-wrap: wrap; gap: 8px 14px; }
+.text-field { flex: 1 0 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.text-field .text { white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0 2px 10px; border-left: 2px solid var(--sg-accent); color: var(--sg-fg); line-height: 1.5; }
+.text-field.conclusions .text { border-left-color: var(--sg-good); }
+.text-field .text .label { font: 10.5px var(--sg-mono); color: var(--sg-dim); }
+.text-field button.edit { border: 0; background: none; padding: 0; color: var(--sg-faint); }
+.text-field button.edit:hover { background: none; color: var(--sg-accent); }
+.text-field.none { flex: 0 0 auto; }
+.text-field.none button.edit { color: var(--sg-dim); }
+.text-field textarea { width: 100%; box-sizing: border-box; font: 13px/1.5 var(--sg-font); color: var(--sg-fg); background: var(--sg-well); border: 1px solid var(--sg-edge); padding: 6px 8px; resize: vertical; }
+.text-field textarea:focus { outline: none; border-color: var(--sg-accent); }
+.text-field .actions { display: flex; align-items: center; gap: 6px; font: 11px var(--sg-mono); }
+.text-field .actions .error { color: var(--sg-bad); }
 
 .topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin: 6px 0 14px; }
 .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--sg-edge); }

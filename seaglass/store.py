@@ -34,6 +34,7 @@ TYPE = re.compile(r"[a-z0-9][a-z0-9_.-]*(/[a-z0-9][a-z0-9_.-]*)+")
 STATUS = re.compile(r"[a-z][a-z0-9_-]{0,31}")
 MAX_ACTIVITY = 500
 MAX_NOTES = 10000
+MAX_CONCLUSIONS = 10000
 MAX_DECLARED = 64 * 1024
 MAX_DESCRIPTION = 2000
 MAX_UNIT = 32
@@ -166,6 +167,15 @@ def check_notes(notes: Any) -> str | None:
     return notes
 
 
+def check_conclusions(conclusions: Any) -> str | None:
+    _check(
+        conclusions is None
+        or (isinstance(conclusions, str) and len(conclusions) <= MAX_CONCLUSIONS),
+        f"conclusions are null or a string of at most {MAX_CONCLUSIONS} characters",
+    )
+    return conclusions
+
+
 def _check_declaration(pattern: Any, decl: Any) -> None:
     _check(
         isinstance(pattern, str) and 0 < len(pattern) <= 200,
@@ -229,8 +239,9 @@ class RunStore:
 
     def _read_meta(self, run_dir: Path) -> dict[str, Any]:
         meta = json.loads((run_dir / "meta.json").read_text())
-        # runs stored before notes and declarations existed have none
+        # runs stored before notes, conclusions and declarations existed have none
         meta.setdefault("notes", None)
+        meta.setdefault("conclusions", None)
         meta.setdefault("declared", {})
         return meta
 
@@ -276,6 +287,7 @@ class RunStore:
         _check(isinstance(provenance, dict), "provenance is a JSON object")
         tags = check_tags(_given(body, "tags", []))
         notes = check_notes(body.get("notes"))
+        conclusions = check_conclusions(body.get("conclusions"))
         declared = check_declared(_given(body, "declared", {}))
         _check_declared_size(declared)
         bundle = body.get("bundle")
@@ -309,6 +321,7 @@ class RunStore:
                 "activity_since": None,
                 "tags": tags,
                 "notes": notes,
+                "conclusions": conclusions,
                 "declared": declared,
                 "provenance": provenance,
                 "bundle": bundle,
@@ -449,6 +462,18 @@ class RunStore:
         with self.lock:
             meta = self._read_meta(run_dir)
             meta["notes"] = notes
+            self._write_meta(run_dir, meta)
+
+    def set_conclusions(self, run_id: str, body: Any) -> None:
+        run_dir = self._dir(run_id)
+        _check(
+            isinstance(body, dict) and "conclusions" in body, "{conclusions} is needed"
+        )
+        conclusions = check_conclusions(body["conclusions"])
+        # like notes, conclusions leave the run's updated and status as they were
+        with self.lock:
+            meta = self._read_meta(run_dir)
+            meta["conclusions"] = conclusions
             self._write_meta(run_dir, meta)
 
     def declare(self, run_id: str, body: Any) -> None:

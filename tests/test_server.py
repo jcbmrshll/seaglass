@@ -44,6 +44,10 @@ def test_a_run_round_trip(server: Server):
         200,
         {"ok": True},
     )
+    assert server.post(f"/api/runs/{run}/conclusions", {"conclusions": "it"}) == (
+        200,
+        {"ok": True},
+    )
     assert server.post(
         f"/api/runs/{run}/declared", {"declared": {"loss": {"log": True}}}
     ) == (200, {"ok": True})
@@ -51,6 +55,7 @@ def test_a_run_round_trip(server: Server):
     assert meta["step"] == 2 and meta["latest"] == {"loss": 0.5}
     assert meta["activity"] == "eval" and meta["config"] == {"lr": 1}
     assert meta["notes"] == "why" and meta["declared"] == {"loss": {"log": True}}
+    assert meta["conclusions"] == "it"
     assert server.get(f"/api/runs/{run}/metrics?since=0")["next"] == 1
     assert server.get(f"/api/runs/{run}/media")["rows"][0]["file"] == "ep/1.npz"
     assert server.get(f"/api/runs/{run}/streams/s")["rows"][0]["x"] == [1]

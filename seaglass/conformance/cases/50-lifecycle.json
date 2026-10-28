@@ -48,6 +48,37 @@
     ]
   },
   {
+    "name": "conclusions are replaced, changing nothing else",
+    "steps": [
+      {"request": {"method": "POST", "path": "/api/runs", "json": {"project": "conformance", "conclusions": "first"}},
+       "response": {"status": 201, "json": {"id": {"$capture": "run"}, "conclusions": "first", "notes": null}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/finish", "json": {}},
+       "response": {"status": 200}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}"},
+       "response": {"status": 200, "json": {"updated": {"$capture": "updated"}}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/conclusions", "json": {"conclusions": "loss plateaued at 0.3 {{nonce}}\n\nnext: a cosine schedule"}},
+       "response": {"status": 200, "json": {"ok": true}}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}"},
+       "response": {"status": 200, "json": {"conclusions": "loss plateaued at 0.3 {{nonce}}\n\nnext: a cosine schedule", "notes": null, "status": "finished", "updated": {"$var": "updated"}}}},
+      {"request": {"method": "GET", "path": "/api/runs"},
+       "response": {"status": 200, "json": {"$contains": [{"id": {"$var": "run"}, "conclusions": "loss plateaued at 0.3 {{nonce}}\n\nnext: a cosine schedule"}]}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/conclusions", "json": {"conclusions": null}},
+       "response": {"status": 200}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}"},
+       "response": {"status": 200, "json": {"conclusions": null, "status": "finished", "updated": {"$var": "updated"}}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/conclusions", "json": {"conclusions": 3}},
+       "response": {"status": 400, "json": {"error": {"$type": "string"}}}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/conclusions", "json": {"conclusions": ["a"]}},
+       "response": {"status": 400}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/conclusions", "json": {"notes": "a"}},
+       "response": {"status": 400}},
+      {"request": {"method": "POST", "path": "/api/runs/{{run}}/conclusions", "json": {}},
+       "response": {"status": 400}},
+      {"request": {"method": "GET", "path": "/api/runs/{{run}}"},
+       "response": {"status": 200, "json": {"conclusions": null}}}
+    ]
+  },
+  {
     "name": "declarations are merged by pattern, changing nothing else",
     "steps": [
       {"request": {"method": "POST", "path": "/api/runs", "json": {"project": "conformance", "declared": {"loss": {"description": "first"}, "acc": {"headline": true}}}},

@@ -229,13 +229,13 @@ class RunList {
         (!f.project || r.project === f.project) &&
         (!f.tag || r.tags?.includes(f.tag)) &&
         (!f.branch || r.provenance?.git?.branch === f.branch) &&
-        (!f.q || `${r.name} ${r.id} ${r.notes ?? ""}`.toLowerCase().includes(f.q.toLowerCase())),
+        (!f.q || `${r.name} ${r.id} ${r.notes ?? ""} ${r.conclusions ?? ""}`.toLowerCase().includes(f.q.toLowerCase())),
     );
     const select = (key, name, options) =>
       h("label", {}, name, h("select", { onchange: (e) => this.setFilter(key, e.target.value) },
         h("option", { value: "", text: "all" }),
         options.map((o) => h("option", { value: o, text: o, selected: o === f[key] }))));
-    const search = h("input", { type: "search", placeholder: "name, id or notes", value: f.q || null, onchange: (e) => this.setFilter("q", e.target.value) });
+    const search = h("input", { type: "search", placeholder: "name, id, notes…", title: "words in a run's name, id, notes or conclusions", value: f.q || null, onchange: (e) => this.setFilter("q", e.target.value) });
 
     // each run's headline metrics, as it declared them, among what it logged
     const summaryOf = (r) => headlines(declaredList(r.declared), Object.keys(r.latest ?? {}));
@@ -380,7 +380,7 @@ class ProjectPage {
 
     const q = new URLSearchParams(location.search);
     const filter = h("input", {
-      type: "search", placeholder: "filter runs", value: q.get("q"), title: "words in a run's name, id, tags or notes",
+      type: "search", placeholder: "filter runs", value: q.get("q"), title: "words in a run's name, id, tags, notes or conclusions",
       oninput: (e) => this.setParams({ q: e.target.value || null }, { table: true, charts: true }),
     });
     const pick = (text, title, ids) => h("button", { text, title, onclick: () => this.setShown(ids()) });
@@ -769,6 +769,16 @@ function eye(on) {
 
 // ---------------------------------------------------------------- run page
 
+// what the run's page lets the reader write about it, under its head: what it is
+// testing and why (SPEC.md §4.8), and what it showed (§4.9)
+const TEXTS = {
+  notes: { what: "notes", title: "what this run is testing and why", placeholder: "what this run is testing, and why" },
+  conclusions: {
+    what: "conclusions", label: "conclusions", title: "what this run showed: what was learned, and what to try next",
+    placeholder: "what this run showed: what was learned, and what to try next",
+  },
+};
+
 class RunPage {
   constructor(id) {
     this.id = id;
@@ -855,7 +865,7 @@ class RunPage {
       if (this.dead) return;
       setConnected(true);
       const changed = run.updated !== this.run.updated || run.status !== this.run.status;
-      const notesChanged = run.notes !== this.run.notes;
+      const textsChanged = Object.keys(TEXTS).filter((f) => run[f] !== this.run[f]);
       // declarations can come after the run starts, or be changed after it ends
       const declaredChanged = JSON.stringify(run.declared) !== JSON.stringify(this.run.declared);
       this.run = run;
@@ -865,7 +875,7 @@ class RunPage {
       this.rows.push(...metrics.rows);
       this.media.push(...media.rows);
       this.renderHead();
-      if (notesChanged) this.renderNotes();
+      textsChanged.forEach((f) => this.renderText(f));
       if (metrics.rows.length) this.stepBar.update();
       if (metrics.rows.length || declaredChanged) this.panels.forEach((p) => p.metrics?.());
       if (media.rows.length) this.stepBar.update();
@@ -1030,15 +1040,16 @@ class RunPage {
   build() {
     this.head = h("div", { class: "runhead" });
     // apart from the head, which is drawn again on every poll, so an edit isn't lost
-    this.notesEl = h("div", { class: "notes" });
+    this.textEls = Object.fromEntries(Object.keys(TEXTS).map((f) => [f, h("div", { class: `text-field ${f}` })]));
+    this.editing = new Set();
     this.tabsEl = h("nav", { class: "tabs" });
     this.stepBar = stepBar(this);
     this.windowEl = h("span", { class: "scrub" });
     this.body = h("div", { class: "rows" });
-    this.pageEl = h("div", { class: "page" }, this.head, this.notesEl, h("div", { class: "topbar" }, this.tabsEl, this.stepBar.el, h("span", { class: "spacer" }), this.windowEl), this.body);
+    this.pageEl = h("div", { class: "page" }, this.head, h("div", { class: "texts" }, Object.values(this.textEls)), h("div", { class: "topbar" }, this.tabsEl, this.stepBar.el, h("span", { class: "spacer" }), this.windowEl), this.body);
     main.replaceChildren(this.pageEl);
     this.renderHead();
-    this.renderNotes();
+    Object.keys(TEXTS).forEach((f) => this.renderText(f));
     this.renderTabs();
     this.renderWindow();
     this.renderTab();
@@ -1073,33 +1084,37 @@ class RunPage {
     );
   }
 
-  // what the run is testing and why (SPEC.md §4.8), which the reader can write here
-  renderNotes() {
-    if (this.notesEditing) return;
-    const notes = this.run.notes;
-    this.notesEl.classList.toggle("none", !notes);
-    this.notesEl.replaceChildren(
-      notes ? h("div", { class: "text", text: notes }) : "",
-      h("button", { class: "edit", text: notes ? "edit notes" : "add notes", title: "what this run is testing and why", onclick: () => this.editNotes() }),
+  // the run's notes or conclusions (TEXTS), which the reader can write here
+  renderText(field) {
+    if (this.editing.has(field)) return;
+    const { what, title, label } = TEXTS[field];
+    const text = this.run[field];
+    const el = this.textEls[field];
+    el.classList.toggle("none", !text);
+    el.replaceChildren(
+      text ? h("div", { class: "text" }, label && h("div", { class: "label", text: label }), text) : "",
+      h("button", { class: "edit", text: `${text ? "edit" : "add"} ${what}`, title, onclick: () => this.editText(field) }),
     );
   }
 
-  editNotes() {
-    this.notesEditing = true;
-    const box = h("textarea", { rows: 4, maxlength: 10000, placeholder: "what this run is testing, and why" });
-    box.value = this.run.notes ?? "";
+  editText(field) {
+    this.editing.add(field);
+    const { placeholder } = TEXTS[field];
+    const el = this.textEls[field];
+    const box = h("textarea", { rows: 4, maxlength: 10000, placeholder });
+    box.value = this.run[field] ?? "";
     const error = h("span", { class: "error" });
     const close = () => {
-      this.notesEditing = false;
-      this.renderNotes();
+      this.editing.delete(field);
+      this.renderText(field);
     };
     const save = async () => {
-      const notes = box.value.trim() || null;
+      const text = box.value.trim() || null;
       saveButton.disabled = true;
       try {
-        await post(`/api/runs/${this.id}/notes`, { notes });
+        await post(`/api/runs/${this.id}/${field}`, { [field]: text });
         if (this.dead) return;
-        this.run = { ...this.run, notes };
+        this.run = { ...this.run, [field]: text };
         close();
       } catch (e) {
         error.textContent = `not saved: ${e.message}`;
@@ -1111,8 +1126,8 @@ class RunPage {
       if (e.key === "Escape") close();
       else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) save();
     });
-    this.notesEl.classList.remove("none");
-    this.notesEl.replaceChildren(box,
+    el.classList.remove("none");
+    el.replaceChildren(box,
       h("div", { class: "actions" },
         saveButton, h("button", { text: "cancel", onclick: close }),
         h("span", { class: "dim", text: "ctrl+enter saves, esc cancels" }), error));
