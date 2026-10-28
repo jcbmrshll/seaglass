@@ -17,7 +17,7 @@ import { currentTheme, mountModule } from "./host.js";
 import { genericView } from "./generic.js";
 import { readNpz } from "./npz.js";
 
-const VERSION = "0.2.0";
+const VERSION = "0.3.0";
 const POLL_MS = 2000;
 const RUNS_POLL_MS = 5000;
 // the windows offered over the charts, in steps
