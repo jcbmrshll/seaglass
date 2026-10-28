@@ -6,6 +6,7 @@
     monitor.activity("collecting episodes")
     monitor.log(step, {"loss": 0.41, "episode": Arrays("gridworld/episode", grid=g)})
     monitor.finish()
+    monitor.conclude("warmup doesn't help here: loss plateaus at 0.3 either way")
 
 What `log` takes, by value:
 
@@ -20,6 +21,9 @@ without asking: a description behind an ⓘ, a unit, a log scale, which way is b
 and which metrics are the run's headline numbers. Once a run describes anything, the
 client says which of what it logs has no description, and at finish which
 descriptions matched nothing it logged.
+
+`conclude` says what the run showed, once it has: a postmortem kept with the run,
+beside the notes that say what it set out to test.
 
 Runs only send data: drawing it is the frontend's job, with the renderers of the
 project's bundle (`views`). Everything but `start` happens on a background thread,
@@ -54,7 +58,7 @@ from urllib.parse import quote
 import numpy as np
 
 from seaglass.bundle import bundle_hash, problems, read_bundle
-from seaglass.store import MAX_DESCRIPTION, MAX_NOTES, MAX_UNIT
+from seaglass.store import MAX_CONCLUSIONS, MAX_DESCRIPTION, MAX_NOTES, MAX_UNIT
 
 DEFAULT_URL = "http://localhost:8008"
 HEARTBEAT_S = 30.0
@@ -266,6 +270,7 @@ class Monitor:
             # too long, the server would refuse the run; better to keep the start
             _log(f"notes cut to their first {MAX_NOTES} characters")
             self.notes = self.notes[:MAX_NOTES]
+        self.conclusions: str | None = None
         self.bundle = read_bundle(views) if views is not None else None
         for problem in problems(self.bundle) if self.bundle else []:
             _log(f"views: {problem}")
@@ -347,6 +352,7 @@ class Monitor:
                 "config": config or {},
                 "tags": self.tags,
                 "notes": self.notes,
+                "conclusions": self.conclusions,
                 "declared": self._declared,
                 "provenance": provenance(),
                 "bundle": self.bundle_hash,
@@ -432,6 +438,8 @@ class Monitor:
                 flush()
                 if kind == "activity":
                     self._post(f"{run}/activity", {"activity": payload})
+                elif kind == "conclusions":
+                    self._post(f"{run}/conclusions", {"conclusions": payload})
                 elif kind == "finish":
                     self._post(f"{run}/finish", {"status": payload})
             except Exception as e:  # noqa: BLE001 - logging must never stop training
@@ -596,6 +604,20 @@ class Monitor:
             self._enqueue("declared", {pattern: decl})
         return pattern
 
+    def conclude(self, text: str | None) -> None:
+        """Say what the run showed, e.g. "warmup doesn't help: loss plateaus at 0.3
+        either way, as the LR decays too early"; plain text, its line breaks kept.
+        Saying it again replaces it, and None clears it. Before or after start, and
+        after finish too: it changes nothing else about the run (SPEC.md §4.9)."""
+        if text is not None:
+            text = str(text)
+            if len(text) > MAX_CONCLUSIONS:
+                _log(f"conclusions cut to their first {MAX_CONCLUSIONS} characters")
+                text = text[:MAX_CONCLUSIONS]
+        self.conclusions = text
+        if self.run_id is not None:
+            self._enqueue("conclusions", text)
+
     def log(self, step: int, data: dict[str, Any]) -> None:
         """Queue values for one step (see the module's docstring); they're sent in the
         background. Values of other kinds are dropped, with a word the first time."""
@@ -645,9 +667,9 @@ class Monitor:
             _log(f"described but never logged: {', '.join(unused)}")
 
     def _at_exit(self) -> None:
-        # a script that ends without finish(): send what it logged, but don't hang
-        unsent = not self._finished and self.run_id is not None
-        if unsent and not self.flush(EXIT_FLUSH_S):
+        # a script that ends without finish(), or concludes after it: send what it
+        # logged, but don't hang
+        if self.run_id is not None and not self.flush(EXIT_FLUSH_S):
             _log("exited before everything logged was sent")
 
     def __enter__(self) -> Self:

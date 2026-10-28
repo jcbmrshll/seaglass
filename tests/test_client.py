@@ -24,7 +24,7 @@ def test_start_records_the_run(server: Server, monkeypatch):
     meta = server.get(f"/api/runs/{m.run_id}")
     assert meta["project"] == "test" and meta["name"] == "named" and meta["total"] == 9
     assert meta["tags"] == ["a", "sweep", "b"]
-    assert meta["notes"] is None
+    assert meta["notes"] is None and meta["conclusions"] is None
     # functions are named, arrays are lists
     assert meta["config"] == {"lr": 0.1, "fn": "len", "arr": [0, 1, 2]}
     prov = meta["provenance"]
@@ -46,6 +46,40 @@ def test_notes_are_passed_or_from_the_environment(server: Server, monkeypatch, c
     assert server.get(f"/api/runs/{m.run_id}")["notes"] == "x" * 10000
     assert "notes cut" in capsys.readouterr().err
     m.finish()
+
+
+def test_conclusions_before_during_and_after_the_run(server: Server, capsys):
+    m = Monitor(server.url, project="test")
+    m.conclude("said before start")
+    m.start()
+    # before start, conclusions go with the run
+    assert server.get(f"/api/runs/{m.run_id}")["conclusions"] == "said before start"
+    m.conclude("loss plateaued at 0.3\nnext: cosine")
+    m.flush()
+    assert (
+        server.get(f"/api/runs/{m.run_id}")["conclusions"]
+        == "loss plateaued at 0.3\nnext: cosine"
+    )
+    m.finish()
+    finished = server.get(f"/api/runs/{m.run_id}")
+    # after finish they're sent too, and the run stays as it ended
+    m.conclude("x" * 20000)
+    m.flush()
+    after = server.get(f"/api/runs/{m.run_id}")
+    assert after["conclusions"] == "x" * 10000
+    assert "conclusions cut" in capsys.readouterr().err
+    assert after["status"] == "finished" and after["updated"] == finished["updated"]
+    m.conclude(None)
+    m.flush()
+    assert server.get(f"/api/runs/{m.run_id}")["conclusions"] is None
+
+
+def test_conclusions_after_finish_are_sent_at_exit(server: Server):
+    m = started(server)
+    m.finish()
+    m.conclude("what it showed")
+    m._at_exit()
+    assert server.get(f"/api/runs/{m.run_id}")["conclusions"] == "what it showed"
 
 
 def test_describe_before_and_after_start(server: Server, capsys):
@@ -210,6 +244,7 @@ def test_logging_never_raises_when_the_server_is_down(capsys):
     assert m.run_id is None
     m.log(0, {"x": 1})
     m.activity("a")
+    m.conclude("never sent")
     m.finish()
     err = capsys.readouterr().err
     assert err.count("can't reach") == 1 and "logging is off" in err

@@ -69,6 +69,7 @@ for step in range(300):
     }
     monitor.log(step, data)
 monitor.finish()
+monitor.conclude("it does: no collapse by step 300, and the final return is 0.92")
 ```
 
 - `log` only queues values. A background thread sends them, so the training loop never
@@ -97,9 +98,13 @@ argv and cwd. Three environment variables apply to every run:
 - `SEAGLASS_NOTES`: the run's notes, when none are passed, so you can say what a
   run is for as you launch it: `SEAGLASS_NOTES="lr warmup, 2x batch" python train.py`.
 
-A run's **notes** say what it is testing and why. They show at the top of its page,
-where you can also write or edit them later (to record what the run turned out to
-show, say), and the run list searches them.
+A run's **notes** say what it is testing and why. Its **conclusions** say what it
+showed: a postmortem, kept with the run, of what was learned and what to try next.
+A script can set them with `monitor.conclude(text)` (before or after `finish`; it
+doesn't reopen the run), and anyone reading the run can write them later. Both show
+at the top of the run's page, where you can write or edit them, and the run list and
+the project page's filter search them. There is no environment variable for
+conclusions, as a run hasn't shown anything when it's launched.
 
 ## Describe your metrics
 

@@ -97,6 +97,7 @@ A run's meta is a JSON object:
 | `activity_since` | time \| null | when `activity` last changed |
 | `tags` | string[] | |
 | `notes` | string \| null | what the run is testing and why, in the words of whoever started it (§4.8) |
+| `conclusions` | string \| null | what the run showed, in the words of whoever studied it (§4.9) |
 | `declared` | object | what the run says its metrics and media keys are (§3.3) |
 | `provenance` | object | where the run came from (§3.2) |
 | `bundle` | string \| null | the hash of the run's bundle |
@@ -183,6 +184,7 @@ the project page of §12 does) takes each field from the newest run that declare
   "config": {"lr": 0.0003},
   "tags": ["sweep-3"],
   "notes": "does warmup still help at this batch size?",
+  "conclusions": null,
   "declared": {"loss": {"description": "TD loss", "log": true, "better": "lower"}},
   "provenance": {"git": null, "host": "gpu-box", "argv": [], "cwd": "/"},
   "bundle": "9c1e…",
@@ -191,12 +193,12 @@ the project page of §12 does) takes each field from the newest run that declare
 ```
 
 Every field is optional: `project` defaults to `default`, `config`, `provenance`
-and `declared` to `{}`, `tags` to `[]` and `notes` to `null`. `notes` is a string of
-at most 10000 characters. `declared` is as §3.3 describes, at most 64 KiB
-serialized; a declaration's known fields MUST have the types listed there, and other
-fields are kept as they are. `bundle` need not have been uploaded (a run
-must not fail to start because its views did); a frontend then draws the run
-without it.
+and `declared` to `{}`, `tags` to `[]`, and `notes` and `conclusions` to `null`.
+`notes` and `conclusions` are each a string of at most 10000 characters. `declared`
+is as §3.3 describes, at most 64 KiB serialized; a declaration's known fields MUST
+have the types listed there, and other fields are kept as they are. `bundle` need
+not have been uploaded (a run must not fail to start because its views did); a
+frontend then draws the run without it.
 
 `201`, the run's meta (§3.1), with `status` `running`, `step` `null` and `latest`
 `{}`.
@@ -300,7 +302,24 @@ written from a frontend, after the fact: setting them changes nothing else, not
 
 `200`, `{"ok": true}`.
 
-### 4.9 Declarations: `POST /api/runs/{id}/declared`
+### 4.9 Conclusions: `POST /api/runs/{id}/conclusions`
+
+```json
+{"conclusions": "it doesn't: loss plateaus at 0.3 either way, as the LR decays too early.\nnext: a cosine schedule"}
+```
+
+What the run showed: a postmortem, written by whoever studied the run, a person or
+an agent, so that what was learned stays with it. Notes say what a run sets out to
+test; conclusions say what it found.
+
+`conclusions` is a string of at most 10000 characters, or `null` to clear them. Like
+notes, they are plain text, not markup, and their line breaks are kept. The server
+replaces the run's conclusions. Like notes, they are about the run rather than from
+it: setting them changes nothing else, not `updated` nor `status`.
+
+`200`, `{"ok": true}`.
+
+### 4.10 Declarations: `POST /api/runs/{id}/declared`
 
 ```json
 {"declared": {"loss": {"description": "TD loss", "unit": "nats"}, "old_name": null}}
@@ -315,7 +334,7 @@ logged by it: they change nothing else, not `updated` nor `status`.
 
 `200`, `{"ok": true}`.
 
-### 4.10 Bundles: `GET /api/bundles/{hash}`, `PUT /api/bundles/{hash}`
+### 4.11 Bundles: `GET /api/bundles/{hash}`, `PUT /api/bundles/{hash}`
 
 A client checks whether the server has a bundle with `GET`, which answers `404`, or
 `200` with:
@@ -738,11 +757,13 @@ SHOULD do the same.
   `http://localhost:8008`.
 - Tags are those passed, plus the comma-separated `SEAGLASS_TAGS`.
 - Notes are those passed, else `SEAGLASS_NOTES`, so whoever launches a run can say
-  what it is for without editing the script.
+  what it is for without editing the script. Conclusions have no such variable, as
+  they come once the run has shown something; a script can set them as it ends
+  (§4.9), from what it measured.
 - At start it records provenance (§3.2), hashes its bundle directory, uploads the
-  bundle if the server lacks it (§4.10), and creates the run (§4.1) with what the
+  bundle if the server lacks it (§4.11), and creates the run (§4.1) with what the
   script declared so far (§3.3). It sends declarations made later as they come
-  (§4.9).
+  (§4.10).
 - Once a run has declared anything, the client says which metrics and media keys it
   logs that no declaration matches, each once, and on finishing which declared
   patterns matched nothing it logged (counting a split chart's group names, §8.4),
@@ -760,8 +781,9 @@ The basic frontend that ships with the reference server polls: the run list ever
 5 seconds, a run's meta, metrics and media every 2 seconds, reading incrementally
 (§2), while its page is visible. It has:
 
-- a **run list**, filterable by project, tag and branch, and searchable by name, id
-  and notes, with each run's status, progress, activity and headline metrics;
+- a **run list**, filterable by project, tag and branch, and searchable by name, id,
+  notes and conclusions, with each run's status, progress, activity and headline
+  metrics;
 - a **project list**, `/projects`: each project, with how many runs it has, how
   many are running, when it was last active and its newest run;
 - a **project page**, `/project/<project>`, that compares the project's runs: the
@@ -774,8 +796,8 @@ The basic frontend that ships with the reference server polls: the run list ever
   expanded, and the charts' metric patterns, smoothing and scale. It reads only what
   §5 offers: the run list, each run's meta (for its config) and the metrics of the
   runs turned on;
-- a **run page**: a header (name, status, activity, provenance, and the notes,
-  which the reader can write or edit there, §4.8), a step bar that
+- a **run page**: a header (name, status, activity, provenance, the notes and the
+  conclusions, which the reader can write or edit there, §4.8, §4.9), a step bar that
   sets the location's step (§7.6), and the run's layout (§8), loading the run's
   bundle and running its modules as §7 describes. Clicking a chart picks a step.
   The page's address holds the location: `/run/<id>?tab=…&step=…&<state>…`, where

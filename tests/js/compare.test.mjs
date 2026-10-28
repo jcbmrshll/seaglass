@@ -44,7 +44,7 @@ test("colour slots follow the run", () => {
   assert.equal(new Set(many.values()).size, SLOTS);
 });
 
-test("runs match a filter on name, id, tags and notes", () => {
+test("runs match a filter on name, id, tags, notes and conclusions", () => {
   const run = { name: "amber-heron-3", id: "20260101-000000-abcd", tags: ["baseline-v2"], notes: "Does warmup help?" };
   assert.ok(runMatches(run, ""));
   assert.ok(runMatches(run, "heron baseline"));
@@ -52,4 +52,6 @@ test("runs match a filter on name, id, tags and notes", () => {
   assert.ok(!runMatches(run, "heron baseline-v3"));
   assert.ok(runMatches(run, "warmup heron"));
   assert.ok(runMatches({ ...run, notes: null }, "heron"));
+  assert.ok(runMatches({ ...run, conclusions: "It plateaus at 0.3" }, "plateaus warmup"));
+  assert.ok(!runMatches({ ...run, conclusions: null }, "plateaus"));
 });

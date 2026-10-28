@@ -24,6 +24,7 @@ def test_create_defaults(store: RunStore):
     assert meta["status"] == "running"
     assert meta["step"] is None and meta["latest"] == {} and meta["tags"] == []
     assert meta["notes"] is None and meta["declared"] == {}
+    assert meta["conclusions"] is None
     assert meta["name"].endswith("-1")
     # the next run of the project is numbered after it
     assert store.create({})["name"].endswith("-2")
@@ -46,6 +47,8 @@ def test_create_defaults(store: RunStore):
         {"provenance": []},
         {"notes": 3},
         {"notes": "x" * 10001},
+        {"conclusions": ["it doesn't"]},
+        {"conclusions": "x" * 10001},
         {"declared": []},
         {"declared": {"loss": "a description"}},
         {"declared": {"loss": None}},
@@ -206,6 +209,35 @@ def test_notes(store: RunStore):
         store.set_notes("20990101-000000-dead", {"notes": "x"})
 
 
+def test_conclusions(store: RunStore):
+    meta = store.create({"notes": "does warmup help?", "conclusions": "first"})
+    run = meta["id"]
+    assert meta["conclusions"] == "first"
+    store.finish(run, {})
+    before = store.get(run)
+    store.set_conclusions(run, {"conclusions": "it doesn't\n\nnext: cosine"})
+    after = store.get(run)
+    assert after["conclusions"] == "it doesn't\n\nnext: cosine"
+    # like notes, conclusions aren't the run logging, and leave the notes be
+    assert after["status"] == "finished" and after["updated"] == before["updated"]
+    assert after["notes"] == "does warmup help?"
+    assert store.list()[0]["conclusions"] == after["conclusions"]
+    store.set_conclusions(run, {"conclusions": None})
+    assert store.get(run)["conclusions"] is None
+    for bad in [
+        {},
+        [],
+        {"notes": "x"},
+        {"conclusions": 1},
+        {"conclusions": "x" * 10001},
+    ]:
+        with pytest.raises(Invalid):
+            store.set_conclusions(run, bad)
+    store.set_conclusions(run, {"conclusions": "x" * 10000})
+    with pytest.raises(NotFound):
+        store.set_conclusions("20990101-000000-dead", {"conclusions": "x"})
+
+
 def test_declarations(store: RunStore):
     loss = {"description": "TD loss", "log": True, "better": "lower"}
     meta = store.create({"declared": {"loss": loss, "acc": {"headline": True}}})
@@ -253,10 +285,12 @@ def test_runs_stored_before_notes_and_declarations_have_none(store: RunStore):
     run = store.create({})["id"]
     path = store.root / run / "meta.json"
     meta = json.loads(path.read_text())
-    del meta["notes"], meta["declared"]
+    del meta["notes"], meta["conclusions"], meta["declared"]
     path.write_text(json.dumps(meta))
     assert store.get(run)["notes"] is None and store.get(run)["declared"] == {}
+    assert store.get(run)["conclusions"] is None
     assert store.list()[0]["notes"] is None
+    assert store.list()[0]["conclusions"] is None
 
 
 def test_list_skips_what_isnt_a_run(store: RunStore):

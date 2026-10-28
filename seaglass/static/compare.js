@@ -80,8 +80,9 @@ export function assignSlots(prev, ids) {
   return next;
 }
 
-// whether a run matches the page's filter: words, each in its name, id or tags
+// whether a run matches the page's filter: words, each in its name, id, tags, notes or
+// conclusions
 export function runMatches(run, q) {
-  const text = `${run.name} ${run.id} ${(run.tags ?? []).join(" ")} ${run.notes ?? ""}`.toLowerCase();
+  const text = `${run.name} ${run.id} ${(run.tags ?? []).join(" ")} ${run.notes ?? ""} ${run.conclusions ?? ""}`.toLowerCase();
   return q.toLowerCase().split(/\s+/).filter(Boolean).every((w) => text.includes(w));
 }
