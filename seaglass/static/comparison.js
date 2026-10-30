@@ -99,6 +99,8 @@ class Comparison {
     this.reading = Promise.resolve();
 
     this.tableEl = table;
+    // sg.css draws what's inside
+    for (const el of [table, charts]) el?.classList.add("sg");
     if (charts) {
       this.chartsEl = h("div", { class: "grid charts compare" });
       charts.replaceChildren(this.chartBar(), this.chartsEl);

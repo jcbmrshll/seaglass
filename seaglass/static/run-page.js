@@ -133,6 +133,8 @@ class RunPage {
     this.files = new Map();
     this.chartWindow = Number(localStorage.getItem("seaglass:chartWindow")) || null;
     this.host = this.makeHost();
+    // sg.css draws what's inside
+    container.classList.add("sg");
     container.replaceChildren(h("div", { class: "empty" }, h("p", { class: "dim", text: "loading run…" })));
     container.scrollTop = 0;
     this.onResize = () => {
