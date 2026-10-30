@@ -12,7 +12,7 @@ import { COMPARE_STATE, mountCompare } from "./comparison.js";
 import { mountRunPage } from "./run-page.js";
 import { closeNote } from "./note.js";
 
-const VERSION = "0.3.0";
+const VERSION = "0.4.0";
 const RUNS_POLL_MS = 5000;
 
 const main = document.getElementById("main");
