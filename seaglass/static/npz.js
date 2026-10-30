@@ -34,13 +34,15 @@ export function readNpy(bytes) {
   const shape = shapeText.split(",").map((s) => s.trim()).filter(Boolean).map(Number);
   const size = shape.reduce((a, b) => a * b, 1);
   const body = bytes.subarray(start + headerLen);
+  const width = descr === "<f2" ? 2 : TYPED[descr]?.BYTES_PER_ELEMENT;
+  if (!width) throw new Error(`unsupported dtype ${descr}`);
+  if (body.length < size * width) throw new Error(`the .npy body is ${body.length} bytes, and shape (${shape}) needs ${size * width}`);
   let data;
   if (descr === "<f2") {
     data = new Float32Array(size);
     for (let i = 0; i < size; i++) data[i] = half(body[2 * i] | (body[2 * i + 1] << 8));
   } else {
     const T = TYPED[descr];
-    if (!T) throw new Error(`unsupported dtype ${descr}`);
     // copied, so it's aligned for its type
     data = new T(body.slice(0, size * T.BYTES_PER_ELEMENT).buffer);
   }

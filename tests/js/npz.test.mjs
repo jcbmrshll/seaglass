@@ -48,3 +48,16 @@ test("rejects big-endian and fortran arrays", () => {
   const ok = readNpy(npy("{'descr': '<f4', 'fortran_order': False, 'shape': (2,), }"));
   assert.deepEqual(ok.shape, [2]);
 });
+
+test("rejects a body shorter than its shape", () => {
+  const npy = (header, body) => {
+    const text = new TextEncoder().encode(header.padEnd(118) + "\n");
+    const out = new Uint8Array(10 + text.length + body);
+    out.set([0x93, ...new TextEncoder().encode("NUMPY"), 1, 0, text.length & 0xff, text.length >> 8]);
+    out.set(text, 10);
+    return out;
+  };
+  assert.throws(() => readNpy(npy("{'descr': '<f4', 'fortran_order': False, 'shape': (3,), }", 8)), /needs 12/);
+  assert.throws(() => readNpy(npy("{'descr': '<f2', 'fortran_order': False, 'shape': (2, 2), }", 6)), /needs 8/);
+  assert.equal(readNpy(npy("{'descr': '<f2', 'fortran_order': False, 'shape': (2, 2), }", 8)).data.length, 4);
+});
