@@ -236,6 +236,35 @@ that targets a version it doesn't support with its default layout instead.
 `examples/gridworld/views` shows all of this: an episode player that responds to the
 keyboard, and a full-tab view that follows and moves the page's step.
 
+## Embed the run page
+
+Another app can draw a run, or compare runs, with this frontend's own pages: the
+modules in `seaglass/static` depend on nothing of seaglass's page around them.
+
+```js
+import { mountRunPage } from "./seaglass/run-page.js";
+import { mountCompare } from "./seaglass/comparison.js";
+import { currentTheme } from "./seaglass/host.js";
+
+const page = mountRunPage(el, {
+  id,
+  search: location.search,
+  // where your server has the API and the bundles, and your address for a run
+  paths: { api: "/seaglass/api", bundles: "/seaglass/bundles", run: (id) => `/seaglass/run/${id}` },
+  theme: () => currentTheme(document.documentElement.dataset.theme),
+  hooks: { head: (run) => closeButton, connected: (ok) => showConnected(ok) },
+});
+addEventListener("popstate", () => page.locationChanged(location.search));
+
+const compare = mountCompare({ table, charts }, { runs, state: { smooth: "5", from: "100" } });
+```
+
+- Load `sg.css`, and set the `--sg-*` variables on `:root` to your colours.
+- Each module's header comment lists its options and hooks: `run-page.js`,
+  `comparison.js`, and `host.js` for a module's frame alone.
+- A module's frame fetches nothing but its own bundle, so your server can refuse an
+  opaque origin (`Origin: null`) everything else.
+
 ## Another server
 
 Another implementation of the protocol can be checked against the suite:
@@ -254,6 +283,6 @@ already holds data.
 ```sh
 uv sync
 uv run pytest                        # client, store, server, bundles, conformance, example
-node --test tests/js/*.test.mjs      # the frontend's logic: layouts, charts' maths, npz decoding
+node --test tests/js/*.test.mjs      # the frontend's logic: layouts, charts' maths, npz, frames
 uv run ruff check . && uv run ruff format --check . && uv run pyright
 ```
