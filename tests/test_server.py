@@ -100,9 +100,6 @@ def test_frontend_routes(server: Server):
         assert b"/static/app.js" in body
     status, headers, _ = server.request("GET", "/static/app.js")
     assert status == 200 and headers["Content-Type"] == "text/javascript"
-    # the frame modules run in loads cross-origin, from an opaque origin
-    status, headers, _ = server.request("GET", "/static/frame.js")
-    assert headers["Access-Control-Allow-Origin"] == "*"
 
 
 @pytest.mark.parametrize(

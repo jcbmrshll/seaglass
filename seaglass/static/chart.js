@@ -7,9 +7,10 @@ import { logTicks, niceTicks } from "./layout.js";
 export const SERIES = [1, 2, 3, 4, 5, 6].map((i) => `var(--sg-s${i})`);
 const H = 150;
 
+// the page's tooltip: its #tip, made here if it has none
 let tip = null;
 export function showTip(x, y, ...children) {
-  tip ??= document.getElementById("tip");
+  if (!tip?.isConnected) tip = document.getElementById("tip") ?? document.body.appendChild(h("div", { id: "tip", hidden: true }));
   tip.replaceChildren(...children.filter((c) => c != null && c !== false));
   tip.hidden = false;
   const r = tip.getBoundingClientRect();
@@ -128,7 +129,7 @@ export function lineChart(series, width, { log = false, mark = null, onPick = nu
     showTip(
       e.clientX,
       e.clientY,
-      h("div", { class: "head", text: `step ${best}${onPick ? " · click to pick" : ""}` }),
+      h("div", { class: "head", text: `step ${best}` }),
       ...rows.map(([v, s]) =>
         h("div", { class: "row" }, h("i", { style: swatchStyle(s) }), h("b", { text: withUnit(fmt(v), s.unit) }), series.length > 1 && h("span", { text: s.name })),
       ),

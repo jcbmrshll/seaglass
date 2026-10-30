@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  applyNavigate, bestValue, chartLog, chartNotes, declared, declaredList, describe, entriesByKey, entryIndexAt, globCapture, globRegex, headlines,
-  locationQuery, logTicks, matchNames, mediaColumns, metricNames, niceTicks, parseLocation, resolveLayout, seriesPoints, smooth, splitGroups,
-  tileNames, valueAt,
+  applyNavigate, bestValue, chartLog, chartNotes, clip, declared, declaredList, describe, entriesByKey, entryIndexAt, globCapture, globRegex, headlines,
+  locationQuery, logTicks, matchNames, mediaColumns, metricNames, niceTicks, parseLocation, rangedSeries, resolveLayout, seriesPoints, smooth, splitGroups,
+  stepOf, stepRange, tileNames, valueAt,
 } from "../../seaglass/static/layout.js";
 
 test("patterns", () => {
@@ -70,6 +70,31 @@ test("metrics as of a step", () => {
   assert.equal(valueAt(rows, "loss", 0), 3);
   assert.equal(valueAt(rows, "acc", 0), null);
   assert.deepEqual(seriesPoints(rows, "loss", 1), [[1, null], [1, 2], [2, 1]]);
+});
+
+test("step ranges", () => {
+  const pts = [[0, 1], [5, 2], [10, 3], [15, 4]];
+  assert.equal(clip(pts), pts);
+  assert.deepEqual(clip(pts, 5, 10), [[5, 2], [10, 3]]);
+  assert.deepEqual(clip(pts, null, 5), [[0, 1], [5, 2]]);
+  assert.deepEqual(clip(pts, 11), [[15, 4]]);
+  assert.equal(stepOf("12"), 12);
+  assert.equal(stepOf(" -3 "), -3);
+  assert.equal(stepOf(""), null);
+  assert.equal(stepOf("1.5"), null);
+  assert.equal(stepOf(null), null);
+  assert.equal(stepRange(null, null), null);
+  assert.deepEqual(stepRange(9, 2), [2, 9]);
+  assert.deepEqual(stepRange(null, 4), [null, 4]);
+});
+
+test("a ranged series is smoothed before it's cut", () => {
+  const pts = [[0, 0], [1, 10], [2, 20], [3, 30]];
+  assert.deepEqual(rangedSeries(pts, 0), { points: pts, raw: null });
+  assert.deepEqual(rangedSeries(pts, 0, 2), { points: [[2, 20], [3, 30]], raw: null });
+  // step 2's average is over steps 1 and 2, though step 1 is cut
+  assert.deepEqual(rangedSeries(pts, 2, 2), { points: [[2, 15], [3, 25]], raw: [[2, 20], [3, 30]] });
+  assert.deepEqual(rangedSeries(pts, 2, 5, 9), { points: [], raw: [] });
 });
 
 test("smoothing keeps gaps", () => {

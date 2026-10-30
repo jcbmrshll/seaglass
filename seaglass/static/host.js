@@ -1,34 +1,54 @@
 // The page's side of a module (SPEC.md §7): each instance in a sandboxed frame of its
 // own, its host calls answered here by a `host` object of async methods.
 
-const FRAME_JS = new URL("./frame.js", import.meta.url).href;
+import { frameMain } from "./frame.js";
 
-const srcdoc = () => `<!doctype html><html><head><meta charset="utf-8"><style>
+// The frame's document. Its bootstrap (frame.js) is written inline, so a frame, whose
+// origin is opaque, fetches nothing but its own bundle: a server can refuse an opaque
+// origin everything else.
+export function frameSrcdoc() {
+  return `<!doctype html><html><head><meta charset="utf-8"><style>
 html,body{margin:0;background:transparent}
 body{color:var(--sg-fg);font:13px/1.45 var(--sg-font)}
 html.fill,html.fill body,html.fill #el{height:100%}
-</style></head><body><div id="el"></div><script type="module" src="${FRAME_JS}"></script></body></html>`;
+</style></head><body><div id="el"></div><script type="module">(${frameMain})();</script></body></html>`;
+}
 
-// the frame under the pointer, which gets the keys pressed on the page
+// A frame's call of host[method](...args): only the host's own methods, never one it
+// inherits (constructor, toString, ...).
+export async function callHost(host, method, args) {
+  const fn = typeof method === "string" && Object.prototype.hasOwnProperty.call(host, method) ? host[method] : null;
+  if (typeof fn !== "function") throw new Error(`host has no method ${method}`);
+  return fn(...(Array.isArray(args) ? args : []));
+}
+
+// the frame under the pointer, which gets the keys pressed on the page, listened for
+// from the first frame on
 let hovered = null;
-document.addEventListener("keydown", (ev) => {
-  if (!hovered || ev.metaKey || ev.ctrlKey || ev.altKey) return;
-  if (ev.target.closest?.("input, select, textarea, [contenteditable]")) return;
-  hovered.contentWindow?.postMessage({ sg: 1, kind: "key", key: ev.key, code: ev.code, shiftKey: ev.shiftKey }, "*");
-  // keys a player takes shouldn't also scroll the page
-  if ([" ", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(ev.key)) ev.preventDefault();
-});
+let listening = false;
+function forwardKeys() {
+  if (listening) return;
+  listening = true;
+  document.addEventListener("keydown", (ev) => {
+    if (!hovered || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    if (ev.target.closest?.("input, select, textarea, [contenteditable]")) return;
+    hovered.contentWindow?.postMessage({ sg: 1, kind: "key", key: ev.key, code: ev.code, shiftKey: ev.shiftKey }, "*");
+    // keys a player takes shouldn't also scroll the page
+    if ([" ", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(ev.key)) ev.preventDefault();
+  });
+}
 
 // Run `module` (a URL) in a frame inside `container`, with render({el, data, run, host}).
 // Returns {update(change), destroy()}. `fill`: the frame takes the container's height
 // rather than its document's.
 export function mountModule(container, { module, data, run, host, theme, fill = false, onError = null }) {
+  forwardKeys();
   const frame = document.createElement("iframe");
   frame.className = "module-frame";
   frame.setAttribute("sandbox", "allow-scripts");
   frame.setAttribute("allow", "fullscreen");
   frame.style.height = fill ? "100%" : "0px";
-  frame.srcdoc = srcdoc();
+  frame.srcdoc = frameSrcdoc();
   let ready = false;
   const queued = [];
   const post = (msg) => {
@@ -48,9 +68,7 @@ export function mountModule(container, { module, data, run, host, theme, fill = 
       onError?.(msg.message);
     } else if (msg.kind === "call") {
       try {
-        const fn = host[msg.method];
-        if (typeof fn !== "function") throw new Error(`host has no method ${msg.method}`);
-        const value = await fn(...(Array.isArray(msg.args) ? msg.args : []));
+        const value = await callHost(host, msg.method, msg.args);
         post({ kind: "reply", id: msg.id, ok: true, value });
       } catch (e) {
         post({ kind: "reply", id: msg.id, ok: false, error: String(e?.message ?? e) });
@@ -81,9 +99,10 @@ export const THEME_VARS = [
   "--sg-font", "--sg-mono",
 ];
 
-export function currentTheme() {
+// `mode` ("light" or "dark") is the page's when it sets its own; by default, the
+// browser's preference.
+export function currentTheme(mode = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") {
   const css = getComputedStyle(document.documentElement);
   const vars = Object.fromEntries(THEME_VARS.map((v) => [v, css.getPropertyValue(v).trim()]));
-  const mode = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   return { mode, vars };
 }

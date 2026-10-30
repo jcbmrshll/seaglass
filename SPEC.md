@@ -793,12 +793,15 @@ The basic frontend that ships with the reference server polls: the run list ever
   none is a headline), sortable by any column. A metric declared `better` is sorted
   best first, its best value marked; the charts come headline metrics first.
   Its address holds the runs turned on, the sort, a filter, whether the table is
-  expanded, and the charts' metric patterns, smoothing and scale. It reads only what
-  §5 offers: the run list, each run's meta (for its config) and the metrics of the
-  runs turned on;
+  expanded, and the charts' metric patterns, smoothing, scale and range of steps.
+  It reads only what §5 offers: the run list, each run's meta (for its config) and
+  the metrics of the runs turned on;
 - a **run page**: a header (name, status, activity, provenance, the notes and the
   conclusions, which the reader can write or edit there, §4.8, §4.9), a step bar that
   sets the location's step (§7.6), and the run's layout (§8), loading the run's
   bundle and running its modules as §7 describes. Clicking a chart picks a step.
   The page's address holds the location: `/run/<id>?tab=…&step=…&<state>…`, where
   `tab` and `step` are reserved and every other parameter is view state.
+
+Its run page and its comparison of runs are modules that depend on nothing of the
+page around them, so another frontend can mount them in its own.
