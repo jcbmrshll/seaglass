@@ -239,6 +239,33 @@ export function seriesPoints(rows, key, from = -Infinity) {
   return pts.sort((a, b) => a[0] - b[0]);
 }
 
+// the points with a step in [lo, hi], either end null for open
+export function clip(points, lo = null, hi = null) {
+  if (lo == null && hi == null) return points;
+  return points.filter(([x]) => (lo == null || x >= lo) && (hi == null || x <= hi));
+}
+
+// a step typed or kept in the address: an integer, or null
+export function stepOf(text) {
+  return text != null && /^\s*-?\d+\s*$/.test(text) ? Number(text) : null;
+}
+
+// a step range [lo, hi] in order, or null when both ends are open
+export function stepRange(lo, hi) {
+  if (lo == null && hi == null) return null;
+  return lo != null && hi != null && lo > hi ? [hi, lo] : [lo, hi];
+}
+
+// a series as a chart draws it: smoothed over `window` points, then cut to the steps
+// [lo, hi], so a point's average doesn't depend on where the range starts. {points,
+// raw}: raw (the points unsmoothed) is null when smoothing changed nothing.
+export function rangedSeries(all, window, lo = null, hi = null) {
+  const smoothed = smooth(all, window);
+  const raw = clip(all, lo, hi);
+  const points = smoothed === all ? raw : clip(smoothed, lo, hi);
+  return { points, raw: points === raw ? null : raw };
+}
+
 // a trailing moving average over `window` points, skipping nulls (which stay gaps)
 export function smooth(points, window) {
   if (!(window > 1)) return points;

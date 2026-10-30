@@ -1,30 +1,19 @@
-// The basic frontend: a run list, and a run page that draws a run's layout (SPEC.md
-// §8) with its bundle's modules, each in a sandboxed frame (§7). No framework: every
-// view is plain DOM built with h(), and text that comes from a run only ever goes in
-// as text. It polls, reading metrics and media incrementally.
+// The basic frontend: a run list, a project list, and the pages that compare a
+// project's runs (comparison.js) and draw a run (run-page.js). No framework: every view
+// is plain DOM built with h(), and text that comes from a run only ever goes in as
+// text. It polls.
 
 import { h } from "./dom.js";
 import { activity, ago, duration, fmt, progress, started, status, withUnit } from "./format.js";
-import {
-  CONTRACT, applyNavigate, bestValue, chartLog, chartNotes, declared, declaredList, describe, entriesByKey, entryIndexAt, headlines, locationQuery, matchNames,
-  mediaColumns, metricNames, parseLocation, resolveLayout, seriesPoints, smooth, splitGroups, tileNames, valueAt,
-} from "./layout.js";
-import { SERIES, hideTip, lineChart, swatchStyle } from "./chart.js";
-import {
-  DEFAULT_SHOWN, SLOTS, assignSlots, configColumns, configText, flattenConfig, parseSort, runMatches, sortBy,
-} from "./compare.js";
-import { currentTheme, mountModule } from "./host.js";
-import { genericView } from "./generic.js";
-import { readNpz } from "./npz.js";
+import { declared, declaredList, headlines } from "./layout.js";
+import { hideTip } from "./chart.js";
+import { DEFAULT_SHOWN, runMatches, sortBy } from "./compare.js";
+import { COMPARE_STATE, mountCompare } from "./comparison.js";
+import { mountRunPage } from "./run-page.js";
+import { closeNote } from "./note.js";
 
 const VERSION = "0.3.0";
-const POLL_MS = 2000;
 const RUNS_POLL_MS = 5000;
-// the windows offered over the charts, in steps
-const CHART_WINDOWS = [50, 200, 1000];
-const FILE_CACHE = 64;
-// run metas read at once, for their configs
-const CONFIG_BATCH = 8;
 
 const main = document.getElementById("main");
 
@@ -40,95 +29,9 @@ async function api(path) {
   return res.json();
 }
 
-// POST a JSON body; a refusal throws with the server's reason
-async function post(path, body) {
-  const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  if (!res.ok) {
-    const reason = await res.json().then((b) => b.error, () => null);
-    throw new Error(reason ?? `${res.status} ${path}`);
-  }
-  return res.json();
-}
-
 function setConnected(ok) {
   document.getElementById("conn").textContent = ok ? "" : "server unreachable";
 }
-
-const enc = (path) => path.split("/").map(encodeURIComponent).join("/");
-const label = (name) => name.replaceAll("_", " ");
-const sep = () => h("span", { class: "sep", text: "·" });
-
-// each bundle's layout.json, once: null if the server doesn't have it
-const layouts = new Map();
-function bundleLayout(hash) {
-  if (!hash) return Promise.resolve(null);
-  if (!layouts.has(hash)) {
-    layouts.set(hash, fetch(`/bundles/${hash}/layout.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null));
-  }
-  return layouts.get(hash);
-}
-
-// ---------------------------------------------------------------- descriptions
-
-// what a metric or media key is (SPEC.md §3.3), shown beside it by a button that opens
-// it: one open at a time, as {id, anchor, notes}. Cards are redrawn as a run logs, so
-// a button drawn again with the same id takes the open one over.
-let openNote = null;
-
-// a button that opens notes ([{names, text}], or one text) beside it; null if there are
-// none
-function noteButton(id, notes) {
-  if (typeof notes === "string") notes = [{ names: [], text: notes }];
-  if (!notes?.length) return null;
-  const open = openNote?.id === id;
-  const btn = h("button", {
-    class: `info${open ? " on" : ""}`, text: "i", title: "what this is", "aria-label": "what this is",
-    "aria-controls": "note", "aria-expanded": String(open),
-    onclick: (e) => {
-      e.stopPropagation();
-      if (openNote?.id === id) closeNote();
-      else showNote(id, btn, notes);
-    },
-  });
-  if (open) openNote.anchor = btn;
-  return btn;
-}
-
-function showNote(id, anchor, notes) {
-  closeNote();
-  const el = document.getElementById("note");
-  el.replaceChildren(...notes.map((n) => h("p", {}, n.names.length > 0 && h("b", { text: n.names.join(", ") }), n.text)));
-  el.hidden = false;
-  openNote = { id, anchor };
-  anchor.classList.add("on");
-  anchor.setAttribute("aria-expanded", "true");
-  placeNote();
-}
-
-function closeNote() {
-  if (!openNote) return;
-  openNote.anchor.classList.remove("on");
-  openNote.anchor.setAttribute("aria-expanded", "false");
-  openNote = null;
-  document.getElementById("note").hidden = true;
-}
-
-// under its button, or over it where there's no room below, and inside the window
-function placeNote() {
-  if (!openNote) return;
-  if (!openNote.anchor.isConnected) return closeNote();
-  const el = document.getElementById("note");
-  const a = openNote.anchor.getBoundingClientRect();
-  const r = el.getBoundingClientRect();
-  const below = a.bottom + 6 + r.height <= innerHeight - 4;
-  el.style.left = `${Math.max(4, Math.min(innerWidth - r.width - 4, a.left - 8))}px`;
-  el.style.top = `${below ? a.bottom + 6 : Math.max(4, a.top - 6 - r.height)}px`;
-}
-
-document.addEventListener("click", (e) => openNote && !e.target.closest?.("#note") && closeNote());
-document.addEventListener("keydown", (e) => e.key === "Escape" && closeNote());
-main.addEventListener("scroll", placeNote, { passive: true });
-addEventListener("resize", placeNote);
 
 // ---------------------------------------------------------------- routing
 
@@ -151,7 +54,7 @@ export function go(path) {
 function show() {
   const r = route();
   if (r.name === "run" && page instanceof RunPage && page.id === r.id) {
-    page.locationChanged(parseLocation(location.search));
+    page.locationChanged(location.search);
     return;
   }
   page?.destroy();
@@ -358,30 +261,26 @@ class ProjectList {
   }
 }
 
+
 // ---------------------------------------------------------------- project page
 
-// a project's runs side by side: a table of what tells them apart (their config) and
-// how they did (their latest metrics), and a chart per metric with a line per run
-// shown. What is shown, the sort and the chart options live in the page's address.
+// a project's runs side by side (comparison.js), the runs down the side, each turned
+// on and off in the charts; expanded, the side is the whole table and the charts step
+// aside. What is shown, the sort and the chart options live in the page's address.
 class ProjectPage {
   constructor(project) {
     this.project = project;
     document.title = `${project} · seaglass`;
     main.className = "";
     this.runs = null;
-    // what the runs declared about their metrics, newest run first (SPEC.md §3.3)
-    this.declared = [];
-    // each run's config, flattened: a run's config never changes, so it is read once
-    this.configs = new Map();
-    // each run's metrics read so far, as {rows, next, updated}, for the runs shown
-    this.metrics = new Map();
-    this.slots = new Map();
-    this.focus = null;
 
     const q = new URLSearchParams(location.search);
     const filter = h("input", {
       type: "search", placeholder: "filter runs", value: q.get("q"), title: "words in a run's name, id, tags, notes or conclusions",
-      oninput: (e) => this.setParams({ q: e.target.value || null }, { table: true, charts: true }),
+      oninput: (e) => {
+        this.setParams({ q: e.target.value || null });
+        this.compare.set({ q: e.target.value || null });
+      },
     });
     const pick = (text, title, ids) => h("button", { text, title, onclick: () => this.setShown(ids()) });
     this.countEl = h("span", { class: "count" });
@@ -391,47 +290,22 @@ class ProjectPage {
       onchange: (e) => go(`/project/${encodeURIComponent(e.target.value)}`),
     }, h("option", { value: project, text: project }));
     this.expandButton = h("button", {
-      class: "expand", onclick: () => this.setParams({ table: this.expanded() ? null : "1" }, { layout: true }),
+      class: "expand", onclick: () => this.setExpanded(!this.expanded()),
     });
     const sideBar = h("div", { class: "side-tools" },
       filter,
       h("div", { class: "scrub" },
         h("span", { class: "dim", text: "show" }),
-        pick("all", "every run the filter matches", () => [...this.shownIds(), ...this.filtered().map((r) => r.id)]),
+        pick("all", "every run the filter matches", () => [...this.shownIds(), ...(this.runs ?? []).filter((r) => runMatches(r, this.param("q") ?? "")).map((r) => r.id)]),
         pick("none", "no runs", () => []),
         pick(`newest ${DEFAULT_SHOWN}`, `the ${DEFAULT_SHOWN} newest runs`, () => (this.runs ?? []).slice(0, DEFAULT_SHOWN).map((r) => r.id))),
       h("div", { class: "side-count" }, this.countEl, h("span", { class: "spacer" }), this.expandButton));
 
-    const metricsBox = h("input", {
-      type: "search", placeholder: "metrics: loss*, return", value: q.get("metrics"), title: "patterns of the metrics to chart, * any characters",
-      onchange: (e) => this.setParams({ metrics: e.target.value.trim() || null }, { charts: true }),
-    });
-    const smoothBox = h("input", {
-      type: "number", min: 0, step: 1, placeholder: "0", value: q.get("smooth"), title: "a moving average over this many points",
-      onchange: (e) => this.setParams({ smooth: Number(e.target.value) > 1 ? String(Math.floor(e.target.value)) : null }, { charts: true }),
-      onkeydown: (e) => e.key === "Enter" && e.target.blur(),
-    });
-    const logButton = h("button", {
-      text: "log y", class: q.get("log") === "1" ? "on" : null, title: "a log-scale y axis for every chart (off: for the metrics the runs say to)",
-      onclick: () => {
-        const on = this.param("log") !== "1";
-        logButton.classList.toggle("on", on);
-        this.setParams({ log: on ? "1" : null }, { charts: true });
-      },
-    });
-    const chartBar = h("div", { class: "topbar" },
-      h("span", { class: "stitle", text: "charts" }),
-      metricsBox,
-      h("span", { class: "scrub" }, h("span", { class: "dim", text: "smooth" }), smoothBox),
-      logButton);
-
-    // the runs down the side, each turned on and off in the charts; expanded, the
-    // side is the whole table and the charts step aside
-    this.tableEl = h("div", { class: "table-wrap" });
-    this.chartsEl = h("div", { class: "grid charts compare" });
+    const tableEl = h("div", { class: "table-wrap" });
+    const chartsEl = h("section", { class: "charts-side" });
     this.layoutEl = h("div", { class: "project-layout" },
-      h("aside", { class: "runs-side" }, sideBar, this.tableEl),
-      h("section", { class: "charts-side" }, chartBar, this.chartsEl));
+      h("aside", { class: "runs-side" }, sideBar, tableEl),
+      chartsEl);
     this.el = h("div", { class: "page wide" },
       h("div", { class: "filters" },
         h("h1", { text: project }),
@@ -443,11 +317,18 @@ class ProjectPage {
     this.applyLayout();
     main.scrollTop = 0;
 
-    this.onResize = () => {
-      clearTimeout(this.resizeTimer);
-      this.resizeTimer = setTimeout(() => this.renderCharts(), 150);
-    };
-    addEventListener("resize", this.onResize);
+    const expanded = this.expanded();
+    this.compare = mountCompare({ table: tableEl, charts: chartsEl }, {
+      state: Object.fromEntries(COMPARE_STATE.map((k) => [k, q.get(k)])),
+      wide: expanded,
+      chartsHidden: expanded,
+      empty: () => h("div", { class: "empty" }, h("h1", { text: "No runs yet" }), h("p", { text: `Runs logged to the project ${project} show up here.` })),
+      hooks: {
+        state: (changes) => this.setParams(changes),
+        toggle: (id) => this.toggle(id),
+        counted: ({ plotted, matched, total }) => (this.countEl.textContent = total ? `${plotted} shown · ${matched} of ${total} runs` : ""),
+      },
+    });
     this.poll();
     this.timer = setInterval(() => document.visibilityState === "visible" && this.poll(), RUNS_POLL_MS);
   }
@@ -455,7 +336,7 @@ class ProjectPage {
   destroy() {
     this.dead = true;
     clearInterval(this.timer);
-    removeEventListener("resize", this.onResize);
+    this.compare.destroy();
   }
 
   // ------------------------------------------------------------ the address
@@ -464,8 +345,8 @@ class ProjectPage {
     return new URLSearchParams(location.search).get(key);
   }
 
-  // set (or, for null, drop) parameters, then redraw what they change
-  setParams(changes, { table = false, charts = false, layout = false } = {}) {
+  // set (or, for null, drop) parameters
+  setParams(changes) {
     const q = new URLSearchParams(location.search);
     for (const [k, v] of Object.entries(changes)) {
       if (v == null) q.delete(k);
@@ -473,15 +354,17 @@ class ProjectPage {
     }
     const s = q.toString();
     history.replaceState(null, "", `/project/${encodeURIComponent(this.project)}${s ? `?${s}` : ""}`);
-    if (layout) this.applyLayout();
-    if (this.runs == null) return;
-    if (table || layout) this.renderTable();
-    if (charts || (layout && !this.expanded())) this.renderCharts();
   }
 
   // whether the side is expanded into the whole table
   expanded() {
     return this.param("table") === "1";
+  }
+
+  setExpanded(on) {
+    this.setParams({ table: on ? "1" : null });
+    this.applyLayout();
+    this.compare.update({ wide: on, chartsHidden: on });
   }
 
   applyLayout() {
@@ -500,30 +383,11 @@ class ProjectPage {
     return picked.split(",").filter(Boolean);
   }
 
-  shown() {
-    const ids = new Set(this.shownIds());
-    return (this.runs ?? []).filter((r) => ids.has(r.id));
-  }
-
-  filtered() {
-    const q = this.param("q") ?? "";
-    return (this.runs ?? []).filter((r) => runMatches(r, q));
-  }
-
-  // what the charts draw: the runs shown that the filter matches
-  plotted() {
-    const ids = new Set(this.filtered().map((r) => r.id));
-    return this.shown().filter((r) => ids.has(r.id));
-  }
-
-  async setShown(ids) {
+  setShown(ids) {
     if (this.runs == null) return;
-    const known = new Set((this.runs ?? []).map((r) => r.id));
+    const known = new Set(this.runs.map((r) => r.id));
     this.setParams({ runs: [...new Set(ids)].filter((id) => known.has(id)).join(",") });
-    this.slots = assignSlots(this.slots, this.shown().map((r) => r.id));
-    this.renderTable();
-    this.renderCharts();
-    if (await this.loadMetrics()) this.renderCharts();
+    this.compare.update({ shown: this.shownIds() });
   }
 
   toggle(id) {
@@ -531,37 +395,25 @@ class ProjectPage {
     this.setShown(ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]);
   }
 
-  colorOf(id) {
-    const slot = this.slots.get(id) ?? 0;
-    return { color: SERIES[slot % SERIES.length], dashed: slot % SLOTS >= SERIES.length };
-  }
-
   // ------------------------------------------------------------ reading
 
   async poll() {
     if (this.polling || this.dead) return;
     this.polling = true;
-    let changed = false;
     try {
       const all = await api("/api/runs");
       setConnected(true);
       this.renderProjects(all);
-      const runs = all.filter((r) => r.project === this.project);
-      changed = this.runs == null || runs.length !== this.runs.length;
-      this.runs = runs;
-      this.slots = assignSlots(this.slots, this.shown().map((r) => r.id));
-      this.declared = runs.flatMap((r) => declaredList(r.declared));
-      await this.loadConfigs();
-      changed = (await this.loadMetrics()) || changed;
+      this.runs = all.filter((r) => r.project === this.project);
     } catch {
       setConnected(false);
       this.runs ??= [];
+    }
+    try {
+      if (!this.dead) await this.compare.update({ runs: this.runs, shown: this.shownIds() });
     } finally {
       this.polling = false;
     }
-    if (this.dead) return;
-    this.renderTable();
-    if (changed) this.renderCharts();
   }
 
   renderProjects(all) {
@@ -573,912 +425,38 @@ class ProjectPage {
       h("option", { value: p, text: `${p} (${counts.get(p)})`, selected: p === this.project })));
     this.projectSelect.disabled = names.length < 2;
   }
-
-  // the configs not read yet: the run list leaves them out
-  async loadConfigs() {
-    const missing = this.runs.filter((r) => !this.configs.has(r.id));
-    for (let i = 0; i < missing.length; i += CONFIG_BATCH) {
-      await Promise.allSettled(
-        missing.slice(i, i + CONFIG_BATCH).map(async (r) => {
-          const run = await api(`/api/runs/${r.id}`);
-          this.configs.set(r.id, flattenConfig(run.config));
-        }),
-      );
-      if (this.dead) return;
-    }
-  }
-
-  // the metrics of the runs shown that logged since they were last read; whether any
-  // came
-  async loadMetrics() {
-    const stale = this.shown().filter((r) => this.metrics.get(r.id)?.updated !== r.updated);
-    const got = await Promise.allSettled(
-      stale.map(async (r) => {
-        const m = this.metrics.get(r.id) ?? { rows: [], next: 0, updated: null };
-        const res = await api(`/api/runs/${r.id}/metrics?since=${m.next}`);
-        m.rows.push(...res.rows);
-        m.next = res.next;
-        m.updated = r.updated;
-        this.metrics.set(r.id, m);
-        return res.rows.length > 0;
-      }),
-    );
-    return got.some((g) => g.status === "fulfilled" && g.value);
-  }
-
-  // ------------------------------------------------------------ the table
-
-  metricColumns() {
-    const names = [];
-    const seen = new Set();
-    for (const r of this.runs) {
-      for (const k of Object.keys(r.latest ?? {})) {
-        if (seen.has(k)) continue;
-        seen.add(k);
-        names.push(k);
-      }
-    }
-    const top = headlines(this.declared, names);
-    return top.length ? top : names;
-  }
-
-  renderTable() {
-    const runs = this.runs;
-    if (!runs.length) {
-      this.countEl.textContent = "";
-      this.tableEl.replaceChildren(h("div", { class: "empty" }, h("h1", { text: "No runs yet" }), h("p", { text: `Runs logged to the project ${this.project} show up here.` })));
-      return;
-    }
-    const shownIds = new Set(this.shownIds());
-    const filtered = this.filtered();
-    // at the side, a run is its toggle and name; expanded, the whole comparison
-    const wide = this.expanded();
-    const config = wide ? configColumns(runs.map((r) => this.configs.get(r.id) ?? {})) : [];
-    const metrics = wide ? this.metricColumns() : [];
-    const sort = parseSort(this.param("sort"));
-    const now = Date.now() / 1000;
-    const value = (r, key) => {
-      if (key.startsWith("c:")) return this.configs.get(r.id)?.[key.slice(2)];
-      if (key.startsWith("m:")) return r.latest?.[key.slice(2)];
-      if (key === "status") return status(r, now);
-      return r[key];
-    };
-    const rows = sortBy(filtered, (r) => value(r, sort.key), sort.desc);
-    // each metric's best value among the runs listed, where it says which way is better
-    const best = new Map(metrics.map((k) => [k, bestValue(this.declared, k, filtered.map((r) => r.latest?.[k]))]));
-    this.countEl.textContent = `${this.plotted().length} shown · ${filtered.length} of ${runs.length} runs`;
-
-    // a header sorts by its column; again, the other way
-    const th = (key, text, cls = "") => {
-      const on = sort.key === key;
-      // a metric sorts best first, highest unless lower is better
-      const metric = key.startsWith("m:") ? key.slice(2) : null;
-      const better = metric && declared(this.declared, metric, "better");
-      const firstDesc = metric ? better !== "lower" : !(key === "name" || key === "status" || key.startsWith("c:"));
-      const next = on ? !sort.desc : firstDesc;
-      const unit = metric && declared(this.declared, metric, "unit");
-      return h("th", {
-        class: `sortable ${cls}${on ? " on" : ""}`, title: `sort by ${text}${better ? ` (${better} is better)` : ""}`,
-        onclick: () => this.setParams({ sort: key === "created" && next ? null : `${next ? "-" : ""}${key}` }, { table: true }),
-      }, text, unit && h("span", { class: "unit", text: ` ${unit}` }), on ? (sort.desc ? " ↓" : " ↑") : "");
-    };
-    const base = [h("th", { class: "pick" }), th("name", "run"), wide && [th("created", "started"), th("step", "step", "num")]];
-    const groups = wide && h("tr", { class: "groups" },
-      h("th", { colspan: 4 }),
-      config.length > 0 && h("th", { colspan: config.length, class: "group", text: "config" }),
-      metrics.length > 0 && h("th", { colspan: metrics.length, class: "group", text: "latest" }));
-    const head = h("tr", {}, base,
-      config.map((k, i) => th(`c:${k}`, k, `num${i === 0 ? " first" : ""}`)),
-      metrics.map((k, i) => th(`m:${k}`, k, `num${i === 0 ? " first" : ""}`)));
-
-    const body = rows.map((r) => {
-      const on = shownIds.has(r.id);
-      const st = status(r, now);
-      const cfg = this.configs.get(r.id);
-      return h("tr", {
-        class: `run${on ? " on" : ""}`,
-        onclick: (e) => !e.target.closest("a") && this.toggle(r.id),
-        onmouseenter: () => this.setFocus(on ? r.id : null),
-        onmouseleave: () => this.setFocus(null),
-      },
-        h("td", { class: "pick" },
-          h("button", { class: "eye", "aria-pressed": String(on), title: on ? "shown in the charts: click to hide" : "hidden: click to show in the charts" }, eye(on))),
-        h("td", { class: "who" },
-          h("div", { class: "line1" },
-            h("i", { class: "swatch", style: on ? swatchStyle(this.colorOf(r.id)) : null }),
-            h("a", { class: "name", href: `/run/${r.id}`, "data-app": true, text: r.name, title: r.notes ? `${r.name}: ${r.notes}` : `open ${r.name}` }),
-            (r.tags ?? []).map((t) => h("span", { class: "chip", text: t }))),
-          h("div", { class: "sub" }, h("span", { class: `dot ${st}`, title: st }), activity(r, now) || (wide ? r.id : `${st} · ${progress(r) || "no steps"}`))),
-        wide && [h("td", { class: "mono", text: started(r.created) }), h("td", { class: "num", text: progress(r) })],
-        config.map((k, i) => h("td", { class: `num${i === 0 ? " first" : ""}`, text: cfg ? configText(cfg[k]) : "…" })),
-        metrics.map((k, i) => {
-          const v = r.latest?.[k];
-          const top = v != null && v === best.get(k);
-          return h("td", { class: `num${i === 0 ? " first" : ""}${top ? " best" : ""}`, title: top ? "the best of these runs" : null, text: fmt(v) });
-        }));
-    });
-    const scrolled = this.tableEl.scrollLeft;
-    this.tableEl.replaceChildren(h("table", { class: `runs compare${wide ? "" : " compact"}` }, h("thead", {}, groups, head), h("tbody", {}, body)));
-    this.tableEl.scrollLeft = scrolled;
-  }
-
-  // ------------------------------------------------------------ the charts
-
-  renderCharts() {
-    // expanded, the charts are out of sight: they're drawn on the way back
-    if (this.runs == null || this.expanded()) return;
-    hideTip();
-    const runs = this.plotted();
-    const rowsOf = (r) => this.metrics.get(r.id)?.rows ?? [];
-    const patterns = (this.param("metrics") ?? "").split(/[\s,]+/).filter(Boolean);
-    const logged = metricNames(runs.flatMap(rowsOf));
-    // the headline metrics first, unless the page asks for some by pattern
-    const top = headlines(this.declared, logged);
-    const names = patterns.length ? matchNames(patterns, logged) : [...top, ...logged.filter((n) => !top.includes(n))];
-    const over = Number(this.param("smooth")) || 0;
-    // log y for every chart, or for the metrics declared log
-    const allLog = this.param("log") === "1";
-
-    if (!names.length) {
-      const why = !runs.length ? "No runs shown: pick some in the table." : patterns.length ? "No metric of the runs shown matches." : "The runs shown haven't logged metrics yet.";
-      this.chartsEl.replaceChildren(h("div", { class: "dim", text: why }));
-      return;
-    }
-    this.chartsEl.replaceChildren(...names.map((key) => {
-      const unit = declared(this.declared, key, "unit");
-      const log = allLog || chartLog(null, this.declared, [key]);
-      const series = runs.flatMap((r) => {
-        const raw = seriesPoints(rowsOf(r), key);
-        if (!raw.length) return [];
-        const points = smooth(raw, over);
-        return [{ id: r.id, name: r.name, ...this.colorOf(r.id), points, raw: points === raw ? null : raw, unit }];
-      });
-      const holder = h("div", { class: "chart-holder" });
-      const card = h("div", { class: "card chart-card" },
-        h("div", { class: "card-hdr" }, h("span", { class: "title", text: label(key), title: key }), noteButton(`compare:${key}`, describe(this.declared, key))),
-        holder);
-      // drawn once the card is laid out, so the chart knows its width
-      requestAnimationFrame(() => {
-        if (!holder.isConnected) return;
-        holder.replaceChildren(lineChart(series, holder.clientWidth - 8, { log }).el);
-        this.applyFocus(holder);
-      });
-      return card;
-    }));
-  }
-
-  // the run hovered in the table or legend stands out in every chart
-  setFocus(id) {
-    this.focus = id;
-    this.applyFocus(this.chartsEl);
-  }
-
-  applyFocus(within) {
-    this.chartsEl.classList.toggle("focus", this.focus != null);
-    for (const p of within.querySelectorAll("path[data-id]")) p.classList.toggle("hl", p.getAttribute("data-id") === this.focus);
-  }
-}
-
-// the toggle that shows a run in the charts, or hides it
-function eye(on) {
-  return h("svg", { class: "eye-icon", viewBox: "0 0 16 16", width: 16, height: 16, "aria-hidden": "true" },
-    h("path", { d: "M1.5 8C3.5 4.6 5.7 3.3 8 3.3s4.5 1.3 6.5 4.7c-2 3.4-4.2 4.7-6.5 4.7S3.5 11.4 1.5 8Z" }),
-    h("circle", { cx: 8, cy: 8, r: 2.1 }),
-    !on && h("line", { x1: 2.5, y1: 13.5, x2: 13.5, y2: 2.5 }));
 }
 
 // ---------------------------------------------------------------- run page
 
-// what the run's page lets the reader write about it, under its head: what it is
-// testing and why (SPEC.md §4.8), and what it showed (§4.9)
-const TEXTS = {
-  notes: { what: "notes", title: "what this run is testing and why", placeholder: "what this run is testing, and why" },
-  conclusions: {
-    what: "conclusions", label: "conclusions", title: "what this run showed: what was learned, and what to try next",
-    placeholder: "what this run showed: what was learned, and what to try next",
-  },
-};
-
+// a run's page (run-page.js), at /run/<id>?<location>
 class RunPage {
   constructor(id) {
     this.id = id;
-    this.run = null;
-    this.rows = [];
-    this.metricsNext = 0;
-    this.media = [];
-    this.mediaNext = 0;
-    this.loc = parseLocation(location.search);
-    this.panels = [];
-    this.modules = new Set();
-    this.files = new Map();
-    this.chartWindow = Number(localStorage.getItem("seaglass:chartWindow")) || null;
-    this.host = this.makeHost();
     main.className = "";
-    main.replaceChildren(h("div", { class: "empty" }, h("p", { class: "dim", text: "loading run…" })));
-    main.scrollTop = 0;
-    this.onTheme = () => this.broadcast({ theme: currentTheme() });
+    this.handle = mountRunPage(main, {
+      id,
+      search: location.search,
+      frontend: `seaglass-basic/${VERSION}`,
+      hooks: {
+        connected: setConnected,
+        run: (run) => (document.title = `${run.name} · seaglass`),
+      },
+    });
+    // frames follow the browser's light or dark
     this.dark = matchMedia("(prefers-color-scheme: dark)");
+    this.onTheme = () => this.handle.themeChanged();
     this.dark.addEventListener("change", this.onTheme);
-    this.onResize = () => {
-      clearTimeout(this.resizeTimer);
-      this.resizeTimer = setTimeout(() => this.panels.forEach((p) => p.resize?.()), 150);
-    };
-    addEventListener("resize", this.onResize);
-    this.start();
+  }
+
+  locationChanged(search) {
+    this.handle.locationChanged(search);
   }
 
   destroy() {
-    this.dead = true;
-    clearInterval(this.timer);
-    removeEventListener("resize", this.onResize);
     this.dark.removeEventListener("change", this.onTheme);
-    this.clearPanels();
+    this.handle.destroy();
   }
-
-  clearPanels() {
-    for (const p of this.panels) p.destroy?.();
-    this.panels = [];
-    this.modules.clear();
-  }
-
-  async start() {
-    try {
-      const [run, metrics, media] = await Promise.all([
-        api(`/api/runs/${this.id}`),
-        api(`/api/runs/${this.id}/metrics?since=0`),
-        api(`/api/runs/${this.id}/media?since=0`),
-      ]);
-      this.run = run;
-      this.declared = declaredList(run.declared);
-      this.rows = metrics.rows;
-      this.metricsNext = metrics.next;
-      this.media = media.rows;
-      this.mediaNext = media.next;
-      setConnected(true);
-    } catch (e) {
-      if (this.dead) return;
-      if (e.status === 404) main.replaceChildren(h("div", { class: "empty" }, h("h1", { text: "No such run" }), h("p", {}, h("a", { href: "/", "data-app": true, text: "all runs" }))));
-      else {
-        setConnected(false);
-        main.replaceChildren(h("div", { class: "empty" }, h("h1", { text: "Couldn't load this run" }), h("p", { class: "dim", text: e.message })));
-      }
-      return;
-    }
-    const raw = await bundleLayout(this.run.bundle);
-    if (this.dead) return;
-    this.layout = resolveLayout(raw);
-    if (this.run.bundle && !raw) this.layout.note = `its views (bundle ${this.run.bundle.slice(0, 12)}…) aren't on this server`;
-    document.title = `${this.run.name} · seaglass`;
-    this.build();
-    this.timer = setInterval(() => document.visibilityState === "visible" && this.poll(), POLL_MS);
-  }
-
-  async poll() {
-    if (this.polling || this.dead) return;
-    this.polling = true;
-    try {
-      const [run, metrics, media] = await Promise.all([
-        api(`/api/runs/${this.id}`),
-        api(`/api/runs/${this.id}/metrics?since=${this.metricsNext}`),
-        api(`/api/runs/${this.id}/media?since=${this.mediaNext}`),
-      ]);
-      if (this.dead) return;
-      setConnected(true);
-      const changed = run.updated !== this.run.updated || run.status !== this.run.status;
-      const textsChanged = Object.keys(TEXTS).filter((f) => run[f] !== this.run[f]);
-      // declarations can come after the run starts, or be changed after it ends
-      const declaredChanged = JSON.stringify(run.declared) !== JSON.stringify(this.run.declared);
-      this.run = run;
-      if (declaredChanged) this.declared = declaredList(run.declared);
-      this.metricsNext = metrics.next;
-      this.mediaNext = media.next;
-      this.rows.push(...metrics.rows);
-      this.media.push(...media.rows);
-      this.renderHead();
-      textsChanged.forEach((f) => this.renderText(f));
-      if (metrics.rows.length) this.stepBar.update();
-      if (metrics.rows.length || declaredChanged) this.panels.forEach((p) => p.metrics?.());
-      if (media.rows.length) this.stepBar.update();
-      if (media.rows.length || declaredChanged) this.panels.forEach((p) => p.media?.());
-      if (changed) this.broadcast({ run });
-    } catch {
-      setConnected(false);
-    } finally {
-      this.polling = false;
-    }
-  }
-
-  broadcast(change) {
-    for (const m of this.modules) m.update(change);
-  }
-
-  // ------------------------------------------------------------ location
-
-  tabIndex() {
-    const i = this.layout.tabs.findIndex((t) => t.title === this.loc.tab);
-    return i < 0 ? 0 : i;
-  }
-
-  setLocation(loc, { push = false } = {}) {
-    const before = this.loc;
-    this.loc = loc;
-    const url = `/run/${this.id}${locationQuery(loc)}`;
-    if (push) history.pushState(null, "", url);
-    else history.replaceState(null, "", url);
-    this.applied(before);
-  }
-
-  // the address changed under the page (back, forward)
-  locationChanged(loc) {
-    const before = this.loc;
-    this.loc = loc;
-    this.applied(before);
-  }
-
-  applied(before) {
-    const loc = this.loc;
-    if (this.tabIndexOf(before.tab) !== this.tabIndex()) {
-      this.renderTabs();
-      this.renderTab();
-    } else if (before.step !== loc.step) {
-      this.panels.forEach((p) => p.step?.());
-    }
-    if (before.step !== loc.step) this.stepBar.update();
-    if (before.step !== loc.step || before.tab !== loc.tab || JSON.stringify(before.state) !== JSON.stringify(loc.state)) {
-      this.broadcast({ location: loc });
-    }
-  }
-
-  tabIndexOf(title) {
-    const i = this.layout.tabs.findIndex((t) => t.title === title);
-    return i < 0 ? 0 : i;
-  }
-
-  navigate(req) {
-    if (!req || typeof req !== "object") throw new Error("navigate takes {tab, step, state, replace}");
-    if ("tab" in req && req.tab != null && !this.layout.tabs.some((t) => t.title === req.tab)) throw new Error(`no tab ${req.tab}`);
-    const next = applyNavigate(this.loc, req);
-    // a new tab or view state is somewhere to come back to, unless the module says
-    // it isn't; a step isn't
-    const push = !req.replace && (("tab" in req && next.tab !== this.loc.tab) || "state" in req);
-    this.setLocation(next, { push });
-  }
-
-  pickStep(step) {
-    const last = this.lastStep();
-    this.setLocation({ ...this.loc, step: step == null || step >= last ? null : step });
-  }
-
-  steps() {
-    const steps = new Set();
-    for (const r of this.rows) steps.add(r.step);
-    for (const e of this.media) steps.add(e.step);
-    return [...steps].sort((a, b) => a - b);
-  }
-
-  lastStep() {
-    return this.steps().at(-1) ?? 0;
-  }
-
-  // ------------------------------------------------------------ host
-
-  makeHost() {
-    const run = () => `/api/runs/${this.id}`;
-    const str = (x, what) => {
-      if (typeof x !== "string") throw new Error(`${what} is a string`);
-      return x;
-    };
-    const since = (opts) => Math.max(0, Math.floor(Number(opts?.since ?? 0)) || 0);
-    const file = (path) => {
-      str(path, "a file path");
-      let p = this.files.get(path);
-      if (!p) {
-        p = fetch(`${run()}/files/${enc(path)}`).then((r) => {
-          if (!r.ok) throw new Error(r.status === 404 ? `no file ${path}` : `${r.status} reading ${path}`);
-          return r.arrayBuffer();
-        });
-        p.catch(() => this.files.delete(path));
-        this.files.set(path, p);
-        // files never change, so they're kept, a few at a time
-        if (this.files.size > FILE_CACHE) this.files.delete(this.files.keys().next().value);
-      }
-      return p;
-    };
-    const pref = (key) => `seaglass:pref:${this.run.project}:${str(key, "a pref key")}`;
-    return {
-      info: async () => ({ contract: CONTRACT, frontend: `seaglass-basic/${VERSION}` }),
-      run: () => api(run()),
-      metrics: (opts) => api(`${run()}/metrics?since=${since(opts)}`),
-      entries: async (opts) => {
-        const res = await api(`${run()}/media?since=${since(opts)}`);
-        if (opts?.key != null) res.rows = res.rows.filter((e) => e.key === opts.key);
-        return res;
-      },
-      stream: (name, opts) => api(`${run()}/streams/${encodeURIComponent(str(name, "a stream name"))}?since=${since(opts)}`),
-      file,
-      json: async (path) => JSON.parse(new TextDecoder().decode(await file(path))),
-      arrays: async (path) => readNpz(await file(path)),
-      theme: async () => currentTheme(),
-      location: async () => this.loc,
-      navigate: async (req) => this.navigate(req),
-      getPref: async (key) => {
-        const v = localStorage.getItem(pref(key));
-        return v == null ? null : JSON.parse(v);
-      },
-      setPref: async (key, value) => {
-        const text = JSON.stringify(value ?? null);
-        if (text.length > 64 * 1024) throw new Error("prefs are at most 64 KiB");
-        localStorage.setItem(pref(key), text);
-      },
-    };
-  }
-
-  // what the page's own (generic) displays read files with
-  get data() {
-    return {
-      url: (path) => `/api/runs/${this.id}/files/${enc(path)}`,
-      json: (path) => this.host.json(path),
-      arrays: (path) => this.host.arrays(path),
-    };
-  }
-
-  mount(container, { module, data, fill = false, onError }) {
-    const url = new URL(`/bundles/${this.run.bundle}/${enc(module)}`, location.origin).href;
-    const m = mountModule(container, { module: url, data, run: this.run, host: this.host, theme: currentTheme(), fill, onError });
-    this.modules.add(m);
-    return {
-      update: (change) => m.update(change),
-      destroy: () => {
-        this.modules.delete(m);
-        m.destroy();
-      },
-    };
-  }
-
-  // ------------------------------------------------------------ the page
-
-  build() {
-    this.head = h("div", { class: "runhead" });
-    // apart from the head, which is drawn again on every poll, so an edit isn't lost
-    this.textEls = Object.fromEntries(Object.keys(TEXTS).map((f) => [f, h("div", { class: `text-field ${f}` })]));
-    this.editing = new Set();
-    this.tabsEl = h("nav", { class: "tabs" });
-    this.stepBar = stepBar(this);
-    this.windowEl = h("span", { class: "scrub" });
-    this.body = h("div", { class: "rows" });
-    this.pageEl = h("div", { class: "page" }, this.head, h("div", { class: "texts" }, Object.values(this.textEls)), h("div", { class: "topbar" }, this.tabsEl, this.stepBar.el, h("span", { class: "spacer" }), this.windowEl), this.body);
-    main.replaceChildren(this.pageEl);
-    this.renderHead();
-    Object.keys(TEXTS).forEach((f) => this.renderText(f));
-    this.renderTabs();
-    this.renderWindow();
-    this.renderTab();
-  }
-
-  renderHead() {
-    const run = this.run;
-    const now = Date.now() / 1000;
-    const st = status(run, now);
-    const end = run.status === "running" ? now : run.updated;
-    const prov = run.provenance ?? {};
-    const git = prov.git;
-    const argv = Array.isArray(prov.argv) ? prov.argv.join(" ") : null;
-    this.head.replaceChildren(
-      h("div", { class: "crumbs" },
-        h("a", { href: `/project/${encodeURIComponent(run.project)}`, "data-app": true, text: run.project, title: "compare the project's runs" }),
-        h("span", { class: "id", text: run.id })),
-      h("h1", { text: run.name }),
-      h("div", { class: "meta" },
-        h("span", { class: `dot ${st}` }), h("span", { text: st }),
-        activity(run, now) && [sep(), h("span", { class: "doing", text: activity(run, now) })],
-        sep(), h("span", { text: `started ${started(run.created)}` }),
-        sep(), h("span", { text: duration(end - run.created) }),
-        run.step != null && [sep(), h("span", { text: progress(run) })],
-        (run.tags ?? []).length > 0 && [sep(), run.tags.map((t) => h("a", { class: "chip", href: `/?tag=${encodeURIComponent(t)}`, "data-app": true, text: t }))]),
-      h("div", { class: "prov" },
-        git && h("span", { title: git.commit }, `${git.branch ?? "?"} @ ${String(git.commit).slice(0, 8)}`, git.dirty ? h("span", { class: "chip dirty", text: "dirty" }) : null),
-        prov.host && h("span", { text: prov.host }),
-        argv && h("span", { class: "argv", title: argv, text: `$ ${argv}` }),
-        prov.cwd && h("span", { class: "dim", text: prov.cwd })),
-      this.layout.note ? h("div", { class: "note", text: `drawn with the default layout: ${this.layout.note}` }) : "",
-    );
-  }
-
-  // the run's notes or conclusions (TEXTS), which the reader can write here
-  renderText(field) {
-    if (this.editing.has(field)) return;
-    const { what, title, label } = TEXTS[field];
-    const text = this.run[field];
-    const el = this.textEls[field];
-    el.classList.toggle("none", !text);
-    el.replaceChildren(
-      text ? h("div", { class: "text" }, label && h("div", { class: "label", text: label }), text) : "",
-      h("button", { class: "edit", text: `${text ? "edit" : "add"} ${what}`, title, onclick: () => this.editText(field) }),
-    );
-  }
-
-  editText(field) {
-    this.editing.add(field);
-    const { placeholder } = TEXTS[field];
-    const el = this.textEls[field];
-    const box = h("textarea", { rows: 4, maxlength: 10000, placeholder });
-    box.value = this.run[field] ?? "";
-    const error = h("span", { class: "error" });
-    const close = () => {
-      this.editing.delete(field);
-      this.renderText(field);
-    };
-    const save = async () => {
-      const text = box.value.trim() || null;
-      saveButton.disabled = true;
-      try {
-        await post(`/api/runs/${this.id}/${field}`, { [field]: text });
-        if (this.dead) return;
-        this.run = { ...this.run, [field]: text };
-        close();
-      } catch (e) {
-        error.textContent = `not saved: ${e.message}`;
-        saveButton.disabled = false;
-      }
-    };
-    const saveButton = h("button", { class: "on", text: "save", onclick: save });
-    box.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") close();
-      else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) save();
-    });
-    el.classList.remove("none");
-    el.replaceChildren(box,
-      h("div", { class: "actions" },
-        saveButton, h("button", { text: "cancel", onclick: close }),
-        h("span", { class: "dim", text: "ctrl+enter saves, esc cancels" }), error));
-    box.focus();
-  }
-
-  renderTabs() {
-    const tabs = this.layout.tabs;
-    const current = this.tabIndex();
-    this.tabsEl.hidden = tabs.length < 2;
-    this.tabsEl.replaceChildren(
-      ...tabs.map((t, i) =>
-        h("button", { class: i === current ? "on" : null, text: t.title ?? `tab ${i + 1}`, onclick: () => this.navigate({ tab: i === 0 ? null : t.title }) }),
-      ),
-    );
-  }
-
-  renderWindow() {
-    const win = this.chartWindow;
-    const set = (n) => {
-      this.chartWindow = n > 0 ? Math.floor(n) : null;
-      if (this.chartWindow) localStorage.setItem("seaglass:chartWindow", this.chartWindow);
-      else localStorage.removeItem("seaglass:chartWindow");
-      this.renderWindow();
-      this.panels.forEach((p) => p.metrics?.());
-    };
-    const toggle = (n, text, title) => h("button", { class: win === n ? "on" : null, text, title, onclick: () => set(n) });
-    const typed = win && !CHART_WINDOWS.includes(win);
-    this.windowEl.replaceChildren(
-      ...[h("span", { class: "dim", text: "charts: last" }),
-      toggle(null, "all", "every step"),
-      CHART_WINDOWS.map((n) => toggle(n, fmt(n), `the last ${n} steps`)),
-      h("input", {
-        type: "number", min: 1, step: 1, placeholder: "N", title: "the last N steps",
-        value: typed ? win : null, class: typed ? "on" : null,
-        onchange: (e) => set(Number(e.target.value)),
-        onkeydown: (e) => e.key === "Enter" && e.target.blur(),
-      }),
-      h("span", { class: "dim", text: "steps" })].flat(),
-    );
-  }
-
-  renderTab() {
-    this.clearPanels();
-    hideTip();
-    closeNote();
-    const tab = this.layout.tabs[this.tabIndex()];
-    const fill = !!tab.panel;
-    main.classList.toggle("fill", fill);
-    this.pageEl.style.minHeight = "";
-    if (fill) {
-      const slot = h("div", { class: "fill-slot" });
-      this.body.replaceChildren(slot);
-      this.addPanel(slot, tab.panel, { fill: true });
-    } else {
-      const rows = (tab.rows ?? []).map((row) => {
-        const rowEl = h("div", { class: "row" });
-        for (const panel of row) {
-          const slot = h("div", { class: "slot" });
-          slot.style.flex = `${Number(panel.width) > 0 ? Number(panel.width) : 1} 1 0`;
-          rowEl.append(slot);
-          this.addPanel(slot, panel);
-        }
-        return rowEl;
-      });
-      this.body.replaceChildren(...rows);
-    }
-  }
-
-  addPanel(slot, panel, { fill = false } = {}) {
-    const make = PANELS[panel?.type];
-    if (!make) {
-      slot.append(h("div", { class: "media-error", text: `no panel type ${panel?.type}` }));
-      return;
-    }
-    this.panels.push(make(this, slot, panel, { fill }));
-  }
-
-  // what tiles and charts show of a metric as of the step picked
-  valueAt(key) {
-    return valueAt(this.rows, key, this.loc.step);
-  }
-}
-
-// ---------------------------------------------------------------- step bar
-
-// the slider that picks the step the page shows (null: the latest, following it)
-function stepBar(page) {
-  const range = h("input", { type: "range", min: 0, max: 0, step: 1, value: 0 });
-  const box = h("input", { type: "number", step: 1, title: "type a step" });
-  const of = h("span", { class: "dim" });
-  const latest = h("button", { text: "latest", title: "back to the latest step, following new ones", onclick: () => page.pickStep(null) });
-  const prev = h("button", { text: "‹", title: "the step before", onclick: () => move(-1) });
-  const next = h("button", { text: "›", title: "the step after", onclick: () => move(1) });
-  // the steps logged, so the slider moves between them
-  const move = (d) => {
-    const steps = page.steps();
-    const at = page.loc.step ?? steps.at(-1);
-    const i = steps.findIndex((s) => s >= at);
-    page.pickStep(steps[Math.min(steps.length - 1, Math.max(0, (i < 0 ? steps.length - 1 : i) + d))]);
-  };
-  range.addEventListener("input", () => page.pickStep(Number(range.value)));
-  box.addEventListener("change", () => box.value !== "" && page.pickStep(Math.round(Number(box.value))));
-  box.addEventListener("keydown", (e) => e.key === "Enter" && box.blur());
-  const el = h("div", { class: "scrub stepbar" }, h("span", { class: "dim pos-label", text: "step" }), prev, range, next, box, of, latest);
-  function update() {
-    const steps = page.steps();
-    el.hidden = !steps.length;
-    const first = steps[0] ?? 0, last = steps.at(-1) ?? 0;
-    range.min = first;
-    range.max = last;
-    range.value = page.loc.step ?? last;
-    if (document.activeElement !== box) box.value = page.loc.step ?? last;
-    of.textContent = `of ${last}`;
-    latest.disabled = page.loc.step == null;
-    el.classList.toggle("pinned", page.loc.step != null);
-  }
-  update();
-  return { el, update };
-}
-
-// ---------------------------------------------------------------- panels
-
-function titled(slot, title) {
-  if (title) slot.append(h("div", { class: "stitle", text: title }));
-}
-
-const PANELS = {
-  tiles(page, slot, panel) {
-    const el = h("div", { class: "tiles" });
-    titled(slot, panel.title);
-    slot.append(el);
-    const draw = () => {
-      const names = tileNames(panel, page.declared, metricNames(page.rows));
-      el.replaceChildren(...names.map((k) => {
-        const unit = declared(page.declared, k, "unit");
-        return h("div", { class: "tile" },
-          h("div", { class: "lab" }, h("span", { text: label(k), title: k }), noteButton(`tile:${k}`, describe(page.declared, k))),
-          h("div", { class: "val" }, fmt(page.valueAt(k)), unit && h("span", { class: "unit", text: ` ${unit}` })));
-      }));
-      el.hidden = !names.length;
-    };
-    draw();
-    return { metrics: draw, step: draw };
-  },
-
-  chart(page, slot, panel) {
-    const patterns = panel.metrics ?? [];
-    const title = panel.title ?? (patterns.length === 1 && !panel.split ? patterns[0] : "");
-    if (panel.split) titled(slot, panel.title);
-    const el = h("div", { class: panel.split ? "grid charts" : "" });
-    slot.append(el);
-    let updates = [];
-    const draw = () => {
-      updates = [];
-      const names = matchNames(patterns, metricNames(page.rows));
-      const groups = panel.split
-        ? splitGroups(names, panel.groups)
-        : names.length ? [{ name: title, series: names.map((k) => ({ name: k, key: k })) }] : [];
-      const last = page.rows.length ? Math.max(...page.rows.map((r) => r.step)) : null;
-      const from = page.chartWindow && last != null ? last - page.chartWindow + 1 : -Infinity;
-      el.replaceChildren(...groups.map((g) => chartCard(page, panel, g, from, updates)));
-    };
-    draw();
-    return {
-      metrics: draw,
-      resize: draw,
-      step: () => updates.forEach((u) => u()),
-    };
-  },
-
-  media(page, slot, panel) {
-    titled(slot, panel.title);
-    const el = h("div", { class: "grid media" });
-    const columns = mediaColumns(panel);
-    if (columns) {
-      el.classList.add("cols");
-      el.style.setProperty("--cols", columns);
-    }
-    slot.append(el);
-    const cards = new Map();
-    const draw = () => {
-      const byKey = entriesByKey(page.media);
-      for (const key of matchNames(panel.keys ?? [], [...byKey.keys()])) {
-        let card = cards.get(key);
-        if (!card) {
-          card = mediaCard(page, key);
-          cards.set(key, card);
-          el.append(card.el);
-        }
-        card.update(byKey.get(key));
-      }
-      el.hidden = !cards.size;
-    };
-    draw();
-    return {
-      media: draw,
-      step: draw,
-      destroy: () => cards.forEach((c) => c.destroy()),
-    };
-  },
-
-  view(page, slot, panel, { fill }) {
-    titled(slot, panel.title);
-    const holder = h("div", { class: fill ? "view-slot" : "" });
-    const card = h("div", { class: "card" }, holder);
-    slot.append(card);
-    if (!page.layout.usable || typeof panel.module !== "string") {
-      holder.append(h("div", { class: "media-error", text: page.layout.usable ? "this view names no module" : "this view's bundle isn't available" }));
-      return {};
-    }
-    const m = page.mount(holder, {
-      module: panel.module,
-      data: panel.props ?? {},
-      fill,
-      onError: (message) => card.append(h("div", { class: "media-error", text: `${panel.module} failed: ${message}` })),
-    });
-    return { destroy: () => m.destroy() };
-  },
-
-  config(page, slot, panel) {
-    titled(slot, panel.title ?? "Config");
-    const config = page.run.config ?? {};
-    const isSection = (v) => v && typeof v === "object" && !Array.isArray(v);
-    const sections = Object.entries(config).filter(([, v]) => isSection(v));
-    const flat = Object.entries(config).filter(([, v]) => !isSection(v));
-    if (flat.length) sections.unshift(["config", Object.fromEntries(flat)]);
-    slot.append(
-      sections.length
-        ? h("div", { class: "config-grid" },
-            sections.map(([name, values]) =>
-              h("div", { class: "card" },
-                h("div", { class: "card-hdr" }, h("span", { class: "title", text: label(name) })),
-                h("table", {}, Object.entries(values).map(([k, v]) => h("tr", {}, h("td", { text: k }), h("td", { text: configText(v) })))))))
-        : h("div", { class: "dim", text: "no config" }),
-    );
-    return {};
-  },
-};
-
-// a chart card: its title, each series' value as of the step picked, and the chart
-function chartCard(page, panel, group, from, updates) {
-  const series = group.series.map((s, i) => {
-    const raw = seriesPoints(page.rows, s.key, from);
-    const smoothed = smooth(raw, panel.smooth);
-    const unit = declared(page.declared, s.key, "unit");
-    return { ...s, color: SERIES[i % SERIES.length], points: smoothed, raw: smoothed === raw ? null : raw, unit };
-  });
-  const single = series.length === 1;
-  const values = series.map(() => h("b"));
-  const showValues = () => series.forEach((s, i) => (values[i].textContent = withUnit(fmt(page.valueAt(s.key)), s.unit)));
-  showValues();
-  const holder = h("div", { class: "chart-holder" });
-  const card = h("div", { class: "card chart-card" },
-    h("div", { class: "card-hdr" },
-      h("span", { class: "title", text: label(group.name), title: group.name }),
-      noteButton(`chart:${group.name}:${group.series.map((s) => s.key).join(",")}`, chartNotes(page.declared, group)),
-      h("span", { class: "spacer" }),
-      single && h("span", { class: "latest" }, values[0])),
-    !single && h("div", { class: "legend" }, series.map((s, i) => h("span", { class: "key" }, h("i", { style: `background:${s.color}` }), s.name, values[i]))),
-    holder);
-  let chart = null;
-  updates.push(() => {
-    showValues();
-    chart?.setMark(page.loc.step);
-  });
-  // drawn once the card is laid out, so the chart knows its width
-  requestAnimationFrame(() => {
-    if (!holder.isConnected) return;
-    chart = lineChart(series, holder.clientWidth - 8, { log: chartLog(panel, page.declared, series.map((s) => s.key)), mark: page.loc.step, onPick: (s) => page.pickStep(s) });
-    holder.replaceChildren(chart.el);
-  });
-  return card;
-}
-
-// a media card: one key's entries, the one shown as of the step picked (or picked
-// here), drawn by the bundle's renderer for its type or the generic display
-function mediaCard(page, key) {
-  const hdr = h("div", { class: "card-hdr" });
-  const attrs = h("div", { class: "media-attrs" });
-  const body = h("div", { class: "media-body" });
-  const el = h("div", { class: "card media-card" }, hdr, attrs, body);
-  let entries = [];
-  // an entry picked here, by index, or null to follow the page's step
-  let picked = null;
-  let shown = null;
-  let module = null; // {path, handle} of the renderer drawing this card
-
-  const pick = (i) => {
-    picked = Math.max(0, Math.min(entries.length - 1, i));
-    update(entries);
-  };
-
-  function update(list) {
-    entries = list;
-    const idx = picked ?? entryIndexAt(entries, page.loc.step);
-    const entry = entries[idx];
-    hdr.replaceChildren(
-      h("span", { class: "title", text: label(key), title: key }),
-      noteButton(`media:${key}`, describe(page.declared, key)),
-      h("span", { class: "spacer" }),
-      h("span", { class: "scrub" },
-        h("button", { text: "‹", title: "previous", disabled: idx === 0, onclick: () => pick(idx - 1) }),
-        h("span", { class: "pos", text: `step ${entry.step}` }),
-        h("button", { text: "›", title: "next", disabled: idx === entries.length - 1, onclick: () => pick(idx + 1) }),
-        h("button", { class: picked == null ? "on" : null, text: "follow", title: "show the entry at the page's step", onclick: () => { picked = null; update(entries); } })),
-    );
-    // swapping what's drawn restarts it, so only when the entry changes
-    const id = `${entry.file}@${entry.time}`;
-    if (shown === id) return;
-    shown = id;
-    draw(entry);
-  }
-
-  function draw(entry) {
-    const path = page.layout.usable ? page.layout.renderers[entry.type] : null;
-    attrs.hidden = !!path || !entry.attrs;
-    attrs.textContent = entry.attrs ? JSON.stringify(entry.attrs) : "";
-    if (path) {
-      if (module?.path === path) {
-        module.handle.update({ data: entry });
-        return;
-      }
-      module?.handle.destroy();
-      body.classList.remove("center");
-      const frameHolder = h("div");
-      body.replaceChildren(frameHolder);
-      const handle = page.mount(frameHolder, {
-        module: path,
-        data: entry,
-        onError: (message) => {
-          if (shown !== `${entry.file}@${entry.time}`) return;
-          const generic = h("div");
-          body.replaceChildren(h("div", { class: "media-error", text: `${path} failed: ${message}` }), generic);
-          module?.handle.destroy();
-          module = null;
-          genericView(generic, entry, page.data).catch((e) => generic.replaceChildren(h("div", { class: "media-error", text: String(e.message) })));
-        },
-      });
-      module = { path, handle };
-      return;
-    }
-    module?.handle.destroy();
-    module = null;
-    body.replaceChildren();
-    genericView(body, entry, page.data).catch((e) => {
-      if (shown === `${entry.file}@${entry.time}`) body.replaceChildren(h("div", { class: "media-error", text: `couldn't show ${entry.file}: ${e.message}` }));
-    });
-  }
-
-  return { el, update, destroy: () => module?.handle.destroy() };
 }
 
 // ---------------------------------------------------------------- start
